@@ -47,20 +47,30 @@ def train(
 def evaluate(
     model: MultiOutputRegressor,
     X_test: np.ndarray,
-    y_test: np.ndarray,
+    y_test_raw: np.ndarray,
+    y_mean: float,
+    y_std: float,
 ) -> tuple[float, float, np.ndarray]:
     """
     Evaluate a fitted Random Forest on test data.
 
+    Predictions are in normalised space (the RF is trained on scaled y from
+    make_splits). This function inverse-transforms them to mg/dL before
+    computing metrics, matching the interface of lstm.evaluate() and
+    autoencoder.evaluate().
+
     Parameters
     ----------
-    X_test  : (n_samples, window_size * n_features)
-    y_test  : (n_samples, horizon)  in the same scale as used during training
+    X_test      : (n_samples, window_size * n_features)
+    y_test_raw  : (n_samples, horizon)  original scale [mg/dL]
+    y_mean, y_std : glucose normalisation stats from the pipeline scaler
+                    (scaler.mean_[glucose_idx], scaler.scale_[glucose_idx])
 
     Returns
     -------
-    (rmse_val, mae_val, predictions)
-        predictions has shape (n_samples, horizon).
+    (rmse_val, mae_val, predictions_mgdl)
+        predictions_mgdl has shape (n_samples, horizon) in mg/dL.
     """
-    predictions = model.predict(X_test)
-    return rmse(y_test, predictions), mae(y_test, predictions), predictions
+    pred_norm = model.predict(X_test)
+    predictions_mgdl = pred_norm * y_std + y_mean
+    return rmse(y_test_raw, predictions_mgdl), mae(y_test_raw, predictions_mgdl), predictions_mgdl

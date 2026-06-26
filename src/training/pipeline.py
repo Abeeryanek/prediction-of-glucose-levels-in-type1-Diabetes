@@ -37,7 +37,7 @@ def _preprocess(df: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
             df[col] = df[col].fillna(0.0)
 
     sensor_cols = [c for c in feature_cols if c not in _EVENT_COLS]
-    drop_on = list(set(sensor_cols) | {"glucose"} & set(df.columns))
+    drop_on = list(set(sensor_cols) | ({"glucose"} & set(df.columns)))
     df = df.dropna(subset=drop_on)
     return df.reset_index(drop=True)
 
@@ -131,7 +131,7 @@ def walk_forward_splits(
     feature_cols: list[str],
     horizon_steps: int,
     n_splits: int = 3,
-    flat: bool = True,
+    flat: bool = False,
     multi_step: bool = False,
 ):
     """
@@ -193,6 +193,7 @@ def make_splits(
     horizon_steps: int,
     val_ratio: float = 0.20,
     multi_step: bool = False,
+    flat: bool = False,
 ) -> dict[str, np.ndarray | StandardScaler]:
     """
     Prepare train / val / test arrays from the official OhioT1DM split files.
@@ -201,6 +202,10 @@ def make_splits(
     (shuffle=False — temporal order is preserved). The scaler is fit only on
     the training rows and then applied to validation and test identically,
     so neither val nor test statistics influence normalisation.
+
+    Raw (unscaled) y arrays in mg/dL are extracted BEFORE scaling and stored
+    under 'y_train_raw', 'y_val_raw', 'y_test_raw'. Pass these to evaluate()
+    so that RMSE and MAE are reported in mg/dL, not in normalised units.
 
     Parameters
     ----------
@@ -219,6 +224,9 @@ def make_splits(
     multi_step : bool
         False (default) → y arrays have shape (n_samples,)          [RF, LSTM, TCN]
         True            → y arrays have shape (n_samples, horizon)  [Seq2Seq Autoencoder]
+    flat : bool
+        False (default) → X shape (n_samples, window_size, n_features) [LSTM / TCN / Autoencoder]
+        True             → X shape (n_samples, window_size * n_features) [Random Forest]
 
     Returns
     -------
@@ -226,7 +234,8 @@ def make_splits(
         'X_train', 'y_train',
         'X_val',   'y_val',
         'X_test',  'y_test',
-        'scaler'   (fitted StandardScaler — use .inverse_transform for metrics)
+        'y_train_raw', 'y_val_raw', 'y_test_raw',  ← unscaled glucose [mg/dL], shape (n, horizon)
+        'scaler'   (fitted StandardScaler — use scaler.mean_ / scaler.scale_ for inverse transform)
     """
     df_train = _preprocess(df_train, feature_cols)
     df_test = _preprocess(df_test, feature_cols)
@@ -235,21 +244,29 @@ def make_splits(
     df_tr = df_train.iloc[:-n_val].reset_index(drop=True)
     df_val = df_train.iloc[-n_val:].reset_index(drop=True)
 
+    # Extract raw targets BEFORE scaling — always multi-step, always in mg/dL
+    _, y_train_raw = create_windows(df_tr,   feature_cols, horizon=horizon_steps, flat=True, multi_step=True)
+    _, y_val_raw   = create_windows(df_val,  feature_cols, horizon=horizon_steps, flat=True, multi_step=True)
+    _, y_test_raw  = create_windows(df_test, feature_cols, horizon=horizon_steps, flat=True, multi_step=True)
+
     # Fit scaler on training rows only; apply same scaler to val and test
     df_tr_sc, df_val_sc, scaler = _scale(df_tr, df_val, feature_cols)
     df_test_sc = df_test.copy()
     df_test_sc[feature_cols] = scaler.transform(df_test[feature_cols])
 
-    X_tr, y_tr = create_windows(df_tr_sc, feature_cols, horizon=horizon_steps, multi_step=multi_step)
-    X_val, y_val = create_windows(df_val_sc, feature_cols, horizon=horizon_steps, multi_step=multi_step)
-    X_te, y_te = create_windows(df_test_sc, feature_cols, horizon=horizon_steps, multi_step=multi_step)
+    X_tr,  y_tr  = create_windows(df_tr_sc,   feature_cols, horizon=horizon_steps, flat=flat, multi_step=multi_step)
+    X_val, y_val = create_windows(df_val_sc,  feature_cols, horizon=horizon_steps, flat=flat, multi_step=multi_step)
+    X_te,  y_te  = create_windows(df_test_sc, feature_cols, horizon=horizon_steps, flat=flat, multi_step=multi_step)
 
     return {
         "X_train": X_tr,
         "y_train": y_tr,
-        "X_val": X_val,
-        "y_val": y_val,
-        "X_test": X_te,
-        "y_test": y_te,
-        "scaler": scaler,
+        "X_val":   X_val,
+        "y_val":   y_val,
+        "X_test":  X_te,
+        "y_test":  y_te,
+        "y_train_raw": y_train_raw,
+        "y_val_raw":   y_val_raw,
+        "y_test_raw":  y_test_raw,
+        "scaler":  scaler,
     }
