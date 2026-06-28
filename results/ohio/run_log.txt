@@ -1,0 +1,108 @@
+============================================================
+SECTION 1 — Imports and Configuration
+============================================================
+Patients : ['559', '563', '570', '575', '588', '591', '540', '544', '552', '567', '584', '596']
+Features : ['glucose', 'bolus', 'carbs']
+Results  : results\ohio
+
+============================================================
+SECTION 2 — Load OhioT1DM Data
+============================================================
+Patient Cohort  Train rows  Test rows                   Sensor columns
+    559   2018       12081       2876 gsr, skin_temp, heartrate, steps
+    563   2018       13098       2691 gsr, skin_temp, heartrate, steps
+    570   2018       11611       2880 gsr, skin_temp, heartrate, steps
+    575   2018       13104       2718 gsr, skin_temp, heartrate, steps
+    588   2018       13106       2880 gsr, skin_temp, heartrate, steps
+    591   2018       12755       2847 gsr, skin_temp, heartrate, steps
+    540   2020       13109       3066 gsr, skin_temp, heartrate, steps
+    544   2020       12672       3136 gsr, skin_temp, heartrate, steps
+    552   2020       11097       3950 gsr, skin_temp, heartrate, steps
+    567   2020       13536       2871 gsr, skin_temp, heartrate, steps
+    584   2020       13248       2995 gsr, skin_temp, heartrate, steps
+    596   2020       13629       3003 gsr, skin_temp, heartrate, steps
+
+============================================================
+SECTION 3 — Grid Search
+============================================================
+Running grid search on patient 559 ...
+  RF   best params : {'n_estimators': 200, 'max_depth': 10, 'min_samples_leaf': 4}
+  RF   RMSE (norm) : 0.3037
+  LSTM best params : {'hidden_size': 128, 'lr': 0.0005}
+  LSTM RMSE (norm) : 0.2417
+Grid search results saved to results\ohio\grid_search_results.json
+
+Best parameters:
+  RF  : {'n_estimators': 200, 'max_depth': 10, 'min_samples_leaf': 4}
+  LSTM: {'hidden_size': 128, 'lr': 0.0005}
+
+============================================================
+SECTION 4 — Main Experiment Loop
+============================================================
+Using device: cuda
+
+[559] (2018) ... done
+[563] (2018) ... done
+[570] (2018) ... done
+[575] (2018) ... done
+[588] (2018) ... done
+[591] (2018) ... done
+[540] (2020) ... done
+[544] (2020) ... done
+[552] (2020) ... done
+[567] (2020) ... done
+[584] (2020) ... done
+[596] (2020) ... done
+
+Experiment loop complete.
+
+============================================================
+SECTION 5 — Results Table
+============================================================
+========================================================================
+MEAN +/- STD  RMSE [mg/dL] and MAE [mg/dL]  (all patients)
+========================================================================
+  Horizon: 5min
+    RF              RMSE: 5.87 ± 1.97   MAE: 3.09 ± 0.45
+    LSTM            RMSE: 5.90 ± 1.51   MAE: 3.47 ± 0.62
+    Autoencoder     RMSE: 6.42 ± 1.75   MAE: 3.81 ± 0.86
+    TCN             RMSE: 9.12 ± 6.55   MAE: 4.90 ± 1.22
+
+  Horizon: 15min
+    RF              RMSE: 14.06 ± 4.14   MAE: 8.66 ± 1.26
+    LSTM            RMSE: 12.74 ± 2.50   MAE: 8.15 ± 1.14
+    Autoencoder     RMSE: 13.12 ± 2.77   MAE: 8.42 ± 1.39
+    TCN             RMSE: 15.40 ± 3.54   MAE: 10.08 ± 1.52
+
+  Horizon: 30min
+    RF              RMSE: 23.35 ± 6.00   MAE: 15.80 ± 2.54
+    LSTM            RMSE: 21.37 ± 3.61   MAE: 14.81 ± 2.12
+    Autoencoder     RMSE: 21.60 ± 3.82   MAE: 15.02 ± 2.29
+    TCN             RMSE: 25.18 ± 5.10   MAE: 18.08 ± 3.19
+
+========================================================================
+CLARKE ZONE A %  at 30-min horizon  (mean +/- std, all patients)
+========================================================================
+  RF            Zone A=86.4% +/- 5.1%   Zone B=13.1%
+  LSTM          Zone A=87.0% +/- 5.1%   Zone B=12.7%
+  Autoencoder   Zone A=86.9% +/- 5.6%   Zone B=12.8%
+  TCN           Zone A=81.3% +/- 8.6%   Zone B=18.3%
+
+============================================================
+SECTION 6 — Clarke Error Grid Plots
+============================================================
+Saved: results\ohio\clarke_30min_all_models.png
+
+============================================================
+SECTION 7 — Prediction Plot (Patient 559)
+============================================================
+Saved: results\ohio\predictions_559_30min.png
+
+============================================================
+SECTION 8 — Save Results
+============================================================
+Done. Results saved to results/ohio/
+  results_all_models.csv        144 rows x 11 columns
+  clarke_30min_all_models.png   Clarke EGA for all 4 models
+  predictions_559_30min.png     24-h forecast comparison, patient 559
+  grid_search_results.json      best hyperparameters
