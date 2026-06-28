@@ -298,7 +298,7 @@ feature_groups = {
     'carbs_only':   lag_features+food_features_carbs,
     'activity':     lag_features+activity_features,
     'comparable':   all_features_comparable,
-    'glucose':   lag_features,
+    'glucose':      ['Glucose']+lag_features,
     'all':          all_features
 }
 

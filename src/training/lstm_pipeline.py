@@ -190,7 +190,7 @@ feature_groups = {
     'carbs_only':   lag_features+food_features_carbs,
     'activity':     lag_features+activity_features,
     'comparable':   all_features_comparable,
-    'glucose':   lag_features,
+    'glucose':      ['Glucose']+lag_features,
     'all':          all_features
 }
 def create_3d_sequences(X_scaled, y_series, seq_length=12):
@@ -274,11 +274,31 @@ class GlucoseLSTM(nn.Module):
     def __init__(self,input_dim, hidden_dim=64,num_layers=2, dropout=0.3):       
         super().__init__()         
         self.lstm = nn.LSTM(input_dim, hidden_dim,num_layers, batch_first=True,dropout=dropout)   
-        self.fc = nn.Linear(hidden_dim, 1)   
-
+        self.fc = nn.Linear(hidden_dim, 1) 
     def forward(self, x):          
         lstm_out, _ = self.lstm(x) 
-        return self.fc(lstm_out[:, -1, :])  
+        return self.fc(lstm_out[:, -1, :])   
+    
+class GlucoseCNNLSTM(nn.Module):
+    def __init__(self, input_dim, hidden_dim=64, num_layers=2,
+                 dropout=0.3, cnn_filters=64, kernel_size=3):
+        super().__init__()
+        self.conv1 = nn.Conv1d(input_dim,  
+                               cnn_filters,
+                               kernel_size)
+        self.relu  = nn.ReLU()
+        self.lstm  = nn.LSTM(cnn_filters, hidden_dim,     
+                             num_layers, batch_first=True, dropout=dropout)
+        self.fc    = nn.Linear(hidden_dim, 1)
+
+    def forward(self, x):
+        #data : batch seq features change to batch feature sequnce then back with cnnfilter as the new features 
+        x = x.permute(0,2,1)  
+        x = self.relu(self.conv1(x))   
+        x = x.permute(0,2, 1)   
+        lstm_out, _ = self.lstm(x)
+        return self.fc(lstm_out[:, -1, :]) 
+   
 def calculate_clinical_weights(y_true):
         weights = np.ones(len(y_true), dtype=np.float32)
         weights[y_true < 54] = 3.0
@@ -286,8 +306,8 @@ def calculate_clinical_weights(y_true):
         weights[(y_true > 180) & (y_true <= 250)] = 1.5
         weights[y_true > 250] = 2.0
         return weights
-def train_weighted_lstm(x_train, y_train, sample_weights, input_dim, epochs=100, patience=15):
-        #evalaution 85% was ist oe what 
+def train_weighted_lstm(x_train, y_train, sample_weights, input_dim, epochs=100, patience=15,model_class=GlucoseLSTM,**kwargs):
+       
         split = int(len(x_train) * 0.85)
         xt = torch.tensor(x_train[:split])
         yt = torch.tensor(y_train[:split]).unsqueeze(1)
@@ -297,7 +317,7 @@ def train_weighted_lstm(x_train, y_train, sample_weights, input_dim, epochs=100,
         yv = torch.tensor(y_train[split:]).unsqueeze(1)
         wv = torch.tensor(sample_weights[split:]).unsqueeze(1)
 
-        model = GlucoseLSTM(input_dim=input_dim)
+        model = model_class(input_dim=input_dim, **kwargs)
         criterion = nn.MSELoss(reduction='none') # None so we can apply custom weights
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
@@ -335,7 +355,7 @@ def train_weighted_lstm(x_train, y_train, sample_weights, input_dim, epochs=100,
         model.load_state_dict(best_weights)
         return model
 
-def run_pipeline(model_name,datasets,datasets_comparable):
+def run_pipeline(model_name,datasets,datasets_comparable,**kwargs):
     results = {}
     for label in ['15min', '30min', '45min']:
         results[label] = {}
@@ -349,7 +369,7 @@ def run_pipeline(model_name,datasets,datasets_comparable):
         y_te = datasets[label]['y_test']
         train_weights = calculate_clinical_weights(y_tr)
         print(f"  Training Weighted LSTM Neural Network...")
-        lstm_model = train_weighted_lstm(x_tr, y_tr, train_weights, input_dim=len(all_features))
+        lstm_model = train_weighted_lstm(x_tr, y_tr, train_weights, input_dim=len(all_features),**kwargs)
         lstm_model.eval()
         with torch.no_grad():
             lstm_preds = lstm_model(torch.tensor(x_te)).numpy().flatten()
@@ -365,7 +385,7 @@ def run_pipeline(model_name,datasets,datasets_comparable):
             'preds':   lstm_preds,
             'metrics': {'rmse': lstm_rmse, 'mae': lstm_mae, 
             'r2': lstm_r2, 'mape': lstm_mape},
-            'y_te':    y_te
+            'y_te':    pd.Series(y_te)
         }
         x_tr_comparable = datasets_comparable[label]['X_train']
         y_tr_comparable = datasets_comparable[label]['y_train']
@@ -374,7 +394,7 @@ def run_pipeline(model_name,datasets,datasets_comparable):
         train_weights_comparable = calculate_clinical_weights(y_tr_comparable)
 
         print(f"  Training Weighted Comparable LSTM Neural Network...")
-        lstm_model_comparable = train_weighted_lstm(x_tr_comparable, y_tr_comparable, train_weights_comparable, input_dim=len(all_features_comparable))
+        lstm_model_comparable = train_weighted_lstm(x_tr_comparable, y_tr_comparable, train_weights_comparable, input_dim=len(all_features_comparable),**kwargs)
         with torch.no_grad():
             lstm_preds_comparable=lstm_model_comparable(torch.tensor(x_te_comparable)).numpy().flatten()
             lstm_rmse_comparable = np.sqrt(mean_squared_error(y_te_comparable, lstm_preds_comparable))
@@ -389,11 +409,11 @@ def run_pipeline(model_name,datasets,datasets_comparable):
             'mae': lstm_mae_comparable,
             'r2': lstm_r2_comparable, 
             'mape': lstm_mape_comparable},
-            'y_te':    y_te_comparable
+            'y_te':    pd.Series(y_te_comparable)
         }
     return results
 
-def run_ablation():
+def run_ablation(feature_groups, df_train, df_test, **kwargs):
     results_ablation = {} 
     for group_name, features in feature_groups.items():
         results_ablation[group_name] = {}
@@ -414,7 +434,7 @@ def run_ablation():
             y_te = y_test
             train_weights = calculate_clinical_weights(y_tr)
             print(f"  Training Weighted LSTM Neural Network...")
-            lstm_model = train_weighted_lstm(x_tr, y_tr, train_weights, input_dim=len(features))
+            lstm_model = train_weighted_lstm(x_tr, y_tr, train_weights, input_dim=len(features), **kwargs)
             lstm_model.eval()
             with torch.no_grad():
                 lstm_preds = lstm_model(torch.tensor(x_te)).numpy().flatten()
@@ -429,15 +449,19 @@ def run_ablation():
     return results_ablation
      
 #lstm    
-results = run_pipeline('lstm',datasets,datasets_comparable)
+results = run_pipeline('lstm',datasets,datasets_comparable,model_class=GlucoseLSTM)
 with open(f'results_lstm.pkl', 'wb') as f:
     pickle.dump(results, f)
-results_ablation = run_ablation()
+clarke_grid_import(results,'lstm')
+results_ablation = run_ablation(feature_groups, df_train, df_test,model_class=GlucoseLSTM)
 with open(f'results_lstm_ablation.pkl', 'wb') as f:
     pickle.dump(results_ablation, f)
-
-clarke_grid_import(results,'lstm')
-
-
+results = run_pipeline('cnnlstm',datasets,datasets_comparable,model_class=GlucoseCNNLSTM)
+with open(f'results_cnnlstm.pkl', 'wb') as f:
+    pickle.dump(results, f)
+clarke_grid_import(results,'CNN_lstm')
+results_ablation = run_ablation(feature_groups, df_train, df_test,model_class=GlucoseCNNLSTM)
+with open(f'results_cnnlstm_ablation.pkl', 'wb') as f:
+    pickle.dump(results_ablation, f)
 
    
