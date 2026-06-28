@@ -178,7 +178,7 @@ all_features      = (temporal_features + sensor_features + food_features_all +
                      activity_features + physio_features_all+lag_features)
 all_features      = [f for f in all_features if f in df_train.columns]
 all_features_comparable=(temporal_features+ sensor_features  + food_features_carbs + 
-                           activity_features + physio_features_heart_rate )
+                           activity_features + physio_features_heart_rate+ lag_features )
 all_features_comparable = [f for f in all_features_comparable if f in df_train.columns]
 feature_groups = {
     'physio_only':  lag_features + physio_features_all,
