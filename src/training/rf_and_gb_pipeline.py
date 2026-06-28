@@ -218,4 +218,140 @@ for label in HORIZONS:
         'test_df': test_clean,
     }
     print(f"  {label}: train={len(train_clean_compare):,}  test={len(test_clean_compare):,}")
+#-------------------------------------------data process done here-----------------------------------------------------------------------------------
+rf  = RandomForestRegressor(n_estimators=300,  
+                                       max_depth=20,
+                                       min_samples_split=10,
+                                       min_samples_leaf=4,
+                                       max_features='sqrt',
+                                       n_jobs=-1,
+                                       random_state=42)
+
+gb  = GradientBoostingRegressor(n_estimators=300, learning_rate=0.05, max_depth=8,
+                                   min_samples_split=10, min_samples_leaf=4,
+                                   subsample=0.8, random_state=42)
+horizen=['15min','30min','45min']
+def calculate_clinical_weights(y_true):
+    weights = np.ones(len(y_true))
+    weights[y_true < 54]                          = 3.0
+    weights[(y_true >= 54)  & (y_true < 70)]      = 2.5
+    weights[(y_true > 180)  & (y_true <= 250)]    = 1.5
+    weights[y_true > 250]                          = 2.0
+    return weights
     
+def run_pipeline(model,model_name,dataset):
+    #scaling 
+
+    results={}
+    for subset in dataset:
+        
+        scaler = StandardScaler()
+        scaler.fit(dataset[subset]['30min']['x_train'])
+        for label in horizen:
+            dataset[subset][label]['x_train_sc'] = scaler.transform(dataset[subset][label]['x_train'])
+            dataset[subset][label]['x_test_sc']  = scaler.transform(dataset[subset][label]['x_test'])
+        print("  StandardScaler fitted on 30min train, applied to all horizons")
+        #train models with clinical weights
+        print("\n[11/12] TRAINING MODELS WITH CLINICAL WEIGHTING...")
+        print("="*80)
+    
+        for label in HORIZONS:
+            print(f"\n{'='*60}")
+            print(f"HORIZON: {label.upper()}")
+            print(f"{'='*60}")
+
+            x_tr = dataset[subset][label]['x_train_sc']
+            y_tr = dataset[subset][label]['y_train']
+            x_te = dataset[subset][label]['x_test_sc']
+            y_te = dataset[subset][label]['y_test']
+
+            print(f"  Sample weight distribution:")
+            print(f"    Severe hypo  (<54)    : {(y_tr < 54).sum():4d} → weight 3.0")
+            print(f"    Moderate hypo (54-70) : {((y_tr >= 54) & (y_tr < 70)).sum():4d} → weight 2.5")
+            print(f"    Normal (70-180)       : {((y_tr >= 70) & (y_tr <= 180)).sum():4d} → weight 1.0")
+            print(f"    Moderate hyper(180-250): {((y_tr > 180) & (y_tr <= 250)).sum():4d} → weight 1.5")
+            print(f"    Severe hyper  (>250)  : {(y_tr > 250).sum():4d} → weight 2.0")
+            train_weights = calculate_clinical_weights(y_tr.values)
+            model.fit(x_tr, y_tr, sample_weight=train_weights)
+            preds = model.predict(x_te)
+            rmse = np.sqrt(mean_squared_error(y_te, preds))
+            mae  = mean_absolute_error(y_te, preds)
+            r2   = r2_score(y_te, preds)
+            mape = np.mean(np.abs((y_te - preds) / y_te)) * 100
+            print(f"{model_name} → RMSE={rmse:.2f} MAE={mae:.2f} R²={r2:.4f} MAPE={mape:.2f}%")
+            if label not in results:
+                results[label] = {} 
+            results[label][f'{model_name}_{subset}']= {
+            'preds':   preds,
+            'metrics': {'rmse': rmse, 'mae': mae, 'r2': r2, 'mape': mape},
+            'y_te':y_te
+            }
+    
+    return results
+    
+feature_groups = {
+    'physio_only':  lag_features + physio_features_all,
+    'EDA'       :    lag_features+physio_features_EDA ,                          
+    'heart_rate':    lag_features+physio_features_heart_rate ,                  
+    'BVP'       :    lag_features+physio_features_BVP,                       
+    'IBI'     :       lag_features+physio_features_IBI ,                   
+    'food_only':    lag_features+food_features_all,
+    'carbs_only':   lag_features+food_features_carbs,
+    'activity':     lag_features+activity_features,
+    'comparable':   all_features_comparable,
+    'glucose':   lag_features,
+    'all':          all_features
+}
+
+
+def run_ablation(model,feature_groups, df_train, df_test):
+    ablation_results = {}
+    for group_name, features in feature_groups.items():
+        ablation_results[group_name] = {}
+        print(f"\nABLATION: {group_name} ({len(features)} features)")
+
+        for label in ['15min', '30min', '45min']:
+            target_col  = f'Target_{label}'
+            train_clean = df_train.dropna(subset=[target_col] + features)
+            test_clean  = df_test.dropna(subset=[target_col] + features)
+
+            scaler_abl  = StandardScaler()
+            x_tr_abl    = scaler_abl.fit_transform(train_clean[features])
+            x_te_abl    = scaler_abl.transform(test_clean[features])
+            y_tr_abl    = train_clean[target_col]
+            y_te_abl    = test_clean[target_col]
+            w_abl       = calculate_clinical_weights(y_tr_abl.values)
+
+            model.fit(x_tr_abl, y_tr_abl, sample_weight=w_abl)
+            preds_abl = model.predict(x_te_abl)
+            rmse_abl  = np.sqrt(mean_squared_error(y_te_abl, preds_abl))
+
+            ablation_results[group_name][label] = rmse_abl
+            print(f"  {label}: RMSE={rmse_abl:.2f}")
+    return ablation_results 
+
+
+#rf reults saved and clark grid plotted   
+results = run_pipeline(rf, 'rf', dataset)
+with open(f'results_rf.pkl', 'wb') as f:
+    pickle.dump(results, f)
+clarke_grid_import(results,'rf')
+
+#ablation
+results_ablation = run_ablation(rf,feature_groups,df_train,df_test)
+with open(f'results_rf_ablation.pkl', 'wb') as f:
+    pickle.dump(results, f)
+
+
+#gb reults saved and clark grid plotted   
+results = run_pipeline(gb, 'gb', dataset)
+with open(f'results_gb.pkl', 'wb') as f:
+    pickle.dump(results, f)
+results_ablation = run_ablation(gb,feature_groups,df_train,df_test)
+with open(f'results_gb_ablation.pkl', 'wb') as f:
+    pickle.dump(results, f)
+clarke_grid_import(results,'gb')
+
+#bar plot for ablation or experimental features optional
+create_bar_plot(results_ablation)
+
