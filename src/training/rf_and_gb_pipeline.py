@@ -170,12 +170,12 @@ print(f"  Test : {len(df_test):,} rows  ({len(df_test)/len(df)*100:.1f}%)")
 print("\n[10/12] PREPARING FEATURES...")
 
 temporal_features = ['Hour','Minute','DayOfWeek','MinFromMidnight','Hour_sin','Hour_cos']
-sensor_features   = ['Glucose'] + sensor_cols
+sensor_features   = sensor_cols
 all_features      = (temporal_features + sensor_features + food_features_all + 
                      activity_features + physio_features_all+lag_features)
 all_features      = [f for f in all_features if f in df_train.columns]
 all_features_comparable=(temporal_features+ sensor_features  + food_features_carbs + 
-                           activity_features + physio_features_heart_rate + lag_features)
+                           activity_features + physio_features_heart_rate )
 all_features_comparable = [f for f in all_features_comparable if f in df_train.columns]
 
 
