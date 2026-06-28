@@ -14,7 +14,7 @@ from torch.utils.data import Dataset, DataLoader #??
 from grid import clarke_grid_import
 warnings.filterwarnings('ignore')
 
-DATA_PATH = str("bental patients")
+DATA_PATH = "data/bigideas"
 
 # LOAD DATA
 print("\n[1/12] LOADING DATA...")
