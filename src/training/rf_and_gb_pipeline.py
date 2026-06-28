@@ -11,7 +11,6 @@ import os
 from grid import clarke_grid_import,create_bar_plot
 warnings.filterwarnings('ignore')
 import matplotlib.pyplot as plt
-import numpy as np
 import pickle
 
 #check the path!

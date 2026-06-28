@@ -13,6 +13,7 @@ import os
 from torch.utils.data import Dataset, DataLoader #??
 from grid import clarke_grid_import
 warnings.filterwarnings('ignore')
+import pickle
 
 DATA_PATH = "data/bigideas"
 
