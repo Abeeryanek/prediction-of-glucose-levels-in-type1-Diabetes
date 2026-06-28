@@ -190,12 +190,15 @@ feature_groups = {
     'carbs_only':   lag_features+food_features_carbs,
     'activity':     lag_features+activity_features,
     'comparable':   all_features_comparable,
-    'glucose':      ['Glucose']+lag_features,
+    'glucose':      lag_features,
     'all':          all_features
 }
-def create_3d_sequences(X_scaled, y_series, seq_length=12):
+def create_3d_sequences(X_scaled, y_series, patient_ids, seq_length=12):
+    patient_ids = np.asarray(patient_ids)
     Xs, ys = [], []
     for i in range(seq_length - 1, len(X_scaled)):
+        if patient_ids[i - seq_length + 1] != patient_ids[i]:
+            continue
         Xs.append(X_scaled[i - seq_length + 1 : i + 1])
         ys.append(y_series.iloc[i])
     return np.array(Xs, dtype=np.float32), np.array(ys, dtype=np.float32)
@@ -216,8 +219,8 @@ for label in HORIZONS:
     X_train_2d = scaler.fit_transform(train_clean[all_features])
     X_test_2d  = scaler.transform(test_clean[all_features])
 
-    X_train_3d, y_train = create_3d_sequences(X_train_2d, train_clean[target_col], SEQ_LENGTH)
-    X_test_3d, y_test   = create_3d_sequences(X_test_2d, test_clean[target_col], SEQ_LENGTH)
+    X_train_3d, y_train = create_3d_sequences(X_train_2d, train_clean[target_col],train_clean['Patient_ID'], SEQ_LENGTH)
+    X_test_3d, y_test   = create_3d_sequences(X_test_2d, test_clean[target_col],test_clean['Patient_ID'], SEQ_LENGTH)
 
     datasets[label] = {
         f'X_train': X_train_3d,
@@ -237,8 +240,8 @@ for label in HORIZONS:
     X_train_2d = scaler.fit_transform(train_clean[all_features_comparable])
     X_test_2d  = scaler.transform(test_clean[all_features_comparable])
 
-    X_train_3d, y_train = create_3d_sequences(X_train_2d, train_clean[target_col], SEQ_LENGTH)
-    X_test_3d, y_test   = create_3d_sequences(X_test_2d, test_clean[target_col], SEQ_LENGTH)
+    X_train_3d, y_train = create_3d_sequences(X_train_2d, train_clean[target_col],train_clean['Patient_ID'], SEQ_LENGTH)
+    X_test_3d, y_test   = create_3d_sequences(X_test_2d, test_clean[target_col],test_clean['Patient_ID'], SEQ_LENGTH)
 
     datasets_comparable[label] = {
         f'X_train': X_train_3d,
@@ -426,8 +429,8 @@ def run_ablation(feature_groups, df_train, df_test, **kwargs):
             X_train_2d = scaler.fit_transform(train_clean[features])
             X_test_2d  = scaler.transform(test_clean[features])
 
-            X_train_3d, y_train = create_3d_sequences(X_train_2d, train_clean[target_col], SEQ_LENGTH)
-            X_test_3d, y_test   = create_3d_sequences(X_test_2d, test_clean[target_col], SEQ_LENGTH)
+            X_train_3d, y_train = create_3d_sequences(X_train_2d, train_clean[target_col],train_clean['Patient_ID'], SEQ_LENGTH)
+            X_test_3d, y_test   = create_3d_sequences(X_test_2d, test_clean[target_col],test_clean['Patient_ID'], SEQ_LENGTH)
             x_tr = X_train_3d
             y_tr = y_train
             x_te = X_test_3d
