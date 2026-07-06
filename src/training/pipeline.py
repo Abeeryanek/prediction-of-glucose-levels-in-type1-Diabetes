@@ -20,7 +20,7 @@ from sklearn.model_selection import TimeSeriesSplit
 from sklearn.preprocessing import StandardScaler
 
 # Columns that represent discrete events — absence means the event did not occur
-_EVENT_COLS: frozenset[str] = frozenset({"carbs", "bolus"})
+_EVENT_COLS: frozenset[str] = frozenset({"carbs", "bolus", "eat_event", "drink_event"})
 
 
 def _preprocess(df: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:

@@ -29,6 +29,7 @@ from src.models import random_forest as rf
 from src.models.lstm import GlucoseLSTM, train_model as lstm_train, evaluate as lstm_eval
 from src.models.autoencoder import GlucoseSeq2Seq, train_model as ae_train, evaluate as ae_eval
 from src.models.tcn import GlucoseTCN, train_model as tcn_train, evaluate as tcn_eval
+from src.models.transformer import GlucoseTransformer, train_model as tr_train, evaluate as tr_eval
 from src.evaluation.metrics import rmse, mae, clarke_error_grid
 from src.evaluation.plots import plot_clarke_error_grid, plot_predictions
 
@@ -47,7 +48,7 @@ HORIZONS = {
 
 CLINICAL_FEATURES = ["glucose", "bolus", "carbs"]
 ALL_PATIENTS      = COHORT_2018 + COHORT_2020
-MODEL_NAMES       = ["RF", "LSTM", "Autoencoder", "TCN"]
+MODEL_NAMES       = ["RF", "LSTM", "Autoencoder", "TCN", "Transformer"]
 
 print("Patients :", ALL_PATIENTS)
 print("Features :", CLINICAL_FEATURES)
@@ -130,10 +131,13 @@ else:
         json.dump(gs_results, f, indent=2)
     print("Grid search results saved to", GS_PATH)
 
+gs_results["transformer"] = {"d_model": 64, "nhead": 4, "lr": 0.001}
+
 print()
 print("Best parameters:")
-print("  RF  :", gs_results["rf"])
-print("  LSTM:", gs_results["lstm"])
+print("  RF         :", gs_results["rf"])
+print("  LSTM       :", gs_results["lstm"])
+print("  Transformer:", gs_results["transformer"])
 
 # ── Section 4 — Main Experiment Loop ─────────────────────────────────────────
 print()
@@ -211,14 +215,23 @@ for pid in ALL_PATIENTS:
             model=tcn_model, lr=lstm_lr,
         )
 
+        tr_model = GlucoseTransformer(n_features=n_features, horizon=HORIZON)
+        tr_model, _ = tr_train(
+            splits_dl["X_train"], splits_dl["y_train"],
+            splits_dl["X_val"],   splits_dl["y_val"],
+            model=tr_model, lr=gs_results["transformer"]["lr"],
+        )
+
         rf_pred   = rf_model.predict(splits_rf["X_test"]) * y_std + y_mean
         lstm_pred = _dl_predict(lstm_model, splits_dl["X_test"], y_mean, y_std)
         ae_pred   = _dl_predict(ae_model,   splits_dl["X_test"], y_mean, y_std)
         tcn_pred  = _dl_predict(tcn_model,  splits_dl["X_test"], y_mean, y_std)
+        tr_pred   = _dl_predict(tr_model,   splits_dl["X_test"], y_mean, y_std)
 
         model_preds = {
             "RF": rf_pred, "LSTM": lstm_pred,
             "Autoencoder": ae_pred, "TCN": tcn_pred,
+            "Transformer": tr_pred,
         }
 
         for step_idx, horizon_name in HORIZONS.items():
@@ -301,7 +314,7 @@ print("=" * 60)
 print("SECTION 6 — Clarke Error Grid Plots")
 print("=" * 60)
 
-fig, axes = plt.subplots(2, 2, figsize=(12, 12))
+fig, axes = plt.subplots(3, 2, figsize=(12, 18))
 axes_flat = axes.ravel()
 
 for ax, model_name in zip(axes_flat, MODEL_NAMES):
@@ -337,7 +350,7 @@ print("=" * 60)
 n_plot = 288
 t = np.arange(n_plot) * 5 / 60
 
-fig, axes = plt.subplots(4, 1, figsize=(14, 14), sharex=True)
+fig, axes = plt.subplots(5, 1, figsize=(14, 17), sharex=True)
 
 for ax, model_name in zip(axes, MODEL_NAMES):
     true_slice = patient_true_559[:n_plot]
