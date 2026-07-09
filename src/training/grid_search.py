@@ -85,7 +85,7 @@ def grid_search_rf(
             y_tr, y_val = y_train[train_idx], y_train[val_idx]
 
             model = rf_mod.train(X_tr, y_tr, params=params)
-            _, _, preds = rf_mod.evaluate(model, X_val, y_val)
+            preds = model.predict(X_val)
             fold_scores.append(rmse(y_val, preds))
 
         mean_score = float(np.mean(fold_scores))

@@ -1,0 +1,95 @@
+============================================================
+Loading OhioT1DM 2018 cohort ...
+============================================================
+Patients: ['559', '563', '570', '575', '588', '591']
+RF params : {'n_estimators': 200, 'max_depth': 10, 'min_samples_leaf': 4}
+LSTM      : hidden_size=128, lr=0.0005
+
+============================================================
+Running ablation ...
+============================================================
+Device: cuda
+
+-- glucose_only  ['glucose']
+   [559]  RF=23.71  LSTM=22.95
+   [563]  RF=19.48  LSTM=19.04
+   [570]  RF=18.64  LSTM=17.10
+   [575]  RF=25.31  LSTM=23.61
+   [588]  RF=20.36  LSTM=19.59
+   [591]  RF=22.72  LSTM=22.24
+
+-- clinical  ['glucose', 'bolus', 'carbs']
+   [559]  RF=23.64  LSTM=22.05
+   [563]  RF=19.48  LSTM=19.04
+   [570]  RF=18.65  LSTM=17.07
+   [575]  RF=25.32  LSTM=23.70
+   [588]  RF=20.32  LSTM=18.73
+   [591]  RF=22.71  LSTM=22.46
+
+-- full  ['glucose', 'bolus', 'carbs', 'heartrate', 'steps']
+   [559]  RF=22.50  LSTM=20.22
+   [563]  ERROR — Not enough rows (0) for window_size=12 + horizon=6.
+   [570]  RF=35.44  LSTM=38.88
+   [575]  ERROR — Not enough rows (0) for window_size=12 + horizon=6.
+   [588]  RF=49.71  LSTM=60.88
+   [591]  RF=22.79  LSTM=21.93
+
+-- glucose_hr  ['glucose', 'heartrate']
+   [559]  RF=28.00  LSTM=26.97
+   [563]  RF=32.19  LSTM=28.79
+   [570]  RF=25.69  LSTM=25.94
+   [575]  RF=28.00  LSTM=24.44
+   [588]  RF=23.04  LSTM=21.52
+   [591]  RF=22.61  LSTM=21.44
+
+-- glucose_steps  ['glucose', 'steps']
+   [559]  RF=28.60  LSTM=27.95
+   [563]  RF=24.65  LSTM=27.03
+   [570]  RF=27.58  LSTM=21.72
+   [575]  RF=22.50  LSTM=26.25
+   [588]  RF=18.97  LSTM=16.45
+   [591]  RF=20.95  LSTM=20.42
+
+-- clinical_hr  ['glucose', 'bolus', 'carbs', 'heartrate']
+   [559]  RF=27.97  LSTM=26.59
+   [563]  RF=32.24  LSTM=25.93
+   [570]  RF=25.63  LSTM=28.08
+   [575]  RF=27.95  LSTM=24.19
+   [588]  RF=23.10  LSTM=21.37
+   [591]  RF=22.60  LSTM=21.81
+
+-- clinical_steps  ['glucose', 'bolus', 'carbs', 'steps']
+   [559]  RF=28.60  LSTM=27.65
+   [563]  RF=24.68  LSTM=26.69
+   [570]  RF=27.59  LSTM=21.11
+   [575]  RF=22.52  LSTM=24.50
+   [588]  RF=18.97  LSTM=16.35
+   [591]  RF=20.96  LSTM=20.80
+
+-- wearable  ['glucose', 'heartrate', 'steps']
+   [559]  RF=22.52  LSTM=20.31
+   [563]  ERROR — Not enough rows (0) for window_size=12 + horizon=6.
+   [570]  RF=35.50  LSTM=41.18
+   [575]  ERROR — Not enough rows (0) for window_size=12 + horizon=6.
+   [588]  RF=50.13  LSTM=59.80
+   [591]  RF=22.80  LSTM=20.44
+
+====================================================================
+FEATURE ABLATION — 30-min RMSE (mean ± std, 6 patients, COHORT_2018)
+====================================================================
+  Feature Set                        RF RMSE           LSTM RMSE
+  --------------------------------------------------------------
+  glucose_only            21.70 ± 2.61          20.76 ± 2.56
+  clinical                21.69 ± 2.61          20.51 ± 2.59
+  full                    32.61 ± 12.90          35.48 ± 18.91
+  glucose_hr              26.59 ± 3.59          24.85 ± 2.97
+  glucose_steps           23.88 ± 3.77          23.30 ± 4.51
+  clinical_hr             26.58 ± 3.60          24.66 ± 2.69
+  clinical_steps          23.89 ± 3.77          22.85 ± 4.24
+  wearable                32.74 ± 13.08          35.43 ± 18.97
+
+Saved: results/ohio/results_feature_ablation.csv
+Saved: results/ohio/feature_ablation_barchart.png
+Saved: results/ohio/feature_importance_rf.png
+
+Done.

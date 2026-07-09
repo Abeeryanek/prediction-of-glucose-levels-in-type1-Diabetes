@@ -1,0 +1,40 @@
+============================================================
+SECTION 1 — Imports and Configuration
+============================================================
+Patients : ['559', '563', '570', '575', '588', '591', '540', '544', '552', '567', '584', '596']
+Features : ['glucose', 'bolus', 'carbs']
+Results  : results\ohio
+
+============================================================
+SECTION 2 — Load OhioT1DM Data
+============================================================
+Patient Cohort  Train rows  Test rows                   Sensor columns
+    559   2018       12081       2876 gsr, skin_temp, heartrate, steps
+    563   2018       13098       2691 gsr, skin_temp, heartrate, steps
+    570   2018       11611       2880 gsr, skin_temp, heartrate, steps
+    575   2018       13104       2718 gsr, skin_temp, heartrate, steps
+    588   2018       13106       2880 gsr, skin_temp, heartrate, steps
+    591   2018       12755       2847 gsr, skin_temp, heartrate, steps
+    540   2020       13109       3066 gsr, skin_temp, heartrate, steps
+    544   2020       12672       3136 gsr, skin_temp, heartrate, steps
+    552   2020       11097       3950 gsr, skin_temp, heartrate, steps
+    567   2020       13536       2871 gsr, skin_temp, heartrate, steps
+    584   2020       13248       2995 gsr, skin_temp, heartrate, steps
+    596   2020       13629       3003 gsr, skin_temp, heartrate, steps
+
+============================================================
+SECTION 3 — Grid Search
+============================================================
+Loaded existing grid search results from results\ohio\grid_search_results.json
+
+Best parameters:
+  RF         : {'n_estimators': 200, 'max_depth': 10, 'min_samples_leaf': 4}
+  LSTM       : {'hidden_size': 128, 'lr': 0.0005}
+  Transformer: {'d_model': 64, 'nhead': 4, 'lr': 0.001}
+
+============================================================
+SECTION 4 — Main Experiment Loop
+============================================================
+Using device: cuda
+
+[559] (2018) ... 
