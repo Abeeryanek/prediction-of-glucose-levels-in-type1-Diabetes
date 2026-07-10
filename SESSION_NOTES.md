@@ -1,32 +1,44 @@
-## Session Summary — Latest Update
+## Session Summary — Latest
 
-### Completed today
-- Transformer model implemented (src/models/transformer.py)
-  Vaswani et al. 2017 / Xiong et al. 2025 / Kalita & Mirza 2025
-- Glucdict dataset loader implemented (src/preprocessing/glucdict_loader.py)
-  13 users, Dexcom G6 CGM + TicWatch heart rate + accelerometer + activity logs
-  Smoke test passed: User1 shape (2838, 6)
-- Full 5-model OhioT1DM experiment completed and committed (7d50788)
-- Abeer's branch merged cleanly into main
+### Everything completed and committed
+- 5 models: RF, LSTM, Autoencoder, TCN, Transformer
+- Grid Search: all 5 models tuned (results in grid_search_results.json)
+- OhioT1DM full experiment: results_all_models.csv committed
+- Clean feature ablation (without 563+575): committed
+- Glucdict: loader + experiments committed
+- Clarke Error Grid for every feature combination, both datasets: committed
+  (results/ohio/clarke_ablation_clean_all_featuresets.png,
+  results/glucdict/clarke_glucdict_all_featuresets.png)
+- Fixed a Random Forest bug: nested joblib parallelism (MultiOutputRegressor
+  n_jobs=-1 wrapping RandomForestRegressor n_jobs=-1) was crashing on Windows
+  with OS resource exhaustion — outer wrapper now n_jobs=1
 
-### 5-Model Results (30-min horizon, 12 patients)
-  Autoencoder:  21.45 ± 3.52  Zone A: 87.4%
-  LSTM:         ~21.25         Zone A: 87.2%
-  Transformer:  23.01 ± 4.05  Zone A: 84.7%
-  RF:           ~23.35         Zone A: ~86.4%
-  TCN:          24.82 ± 3.65  Zone A: 81.3%
+### Tuned hyperparameters
+  RF:          n_estimators=200, max_depth=10, min_samples_leaf=4
+  LSTM:        hidden_size=128, lr=5e-4
+  Autoencoder: latent_size=16, lr=5e-4
+  TCN:         num_filters=32, lr=5e-4
+  Transformer: d_model=128, nhead=4, lr=5e-4
+
+### Key findings this session
+- glucose_only ≈ clinical on both datasets — bolus/carbs/meal-events add
+  almost nothing at the 30-min horizon
+- full/wearable feature sets are consistently worst AND highest-variance on
+  both OhioT1DM and Glucdict — extra heartrate/accelerometer features hurt,
+  not help; confirmed via RMSE and Clarke Zone A/D (Zone A drops from 88.6%
+  to 75.6% on Ohio, with 1.5% landing in dangerous Zone D)
+- Tuned Transformer (22.91 mg/dL @ 30min) now beats RF and TCN — was worse
+  than both when untuned/hardcoded
+
+### Not yet committed
+- PRESENTATION_MONDAY.md / .pptx / make_pptx.py — content is fully updated
+  with this session's results (15 slides), just needs `git add` + commit
+  when ready
 
 ### Tomorrow — in this exact order
-1. Run run_feature_ablation_clean.py
-   (re-run without patients 563+575 — professor's request)
-   Create the file first, then: python -u run_feature_ablation_clean.py
+1. Preprocessing comparison table vs literature
+   Create a markdown/CSV table comparing our steps to the papers
 
-2. Create run_glucdict_experiments.py and run it
-   Feature sets to test: glucose_only, glucose_hr,
-   glucose_activity, full_wearable
+2. Detailed final experiments plan document
 
-3. Expand Grid Search to all 5 models (AE, TCN, Transformer)
-
-4. Clarke Error Grid for ALL feature combinations
-
-5. Prepare presentation for next meeting
+3. Commit presentation files (see "Not yet committed" above)
