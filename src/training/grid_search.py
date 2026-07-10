@@ -1,5 +1,6 @@
 """
-Hyperparameter search for Random Forest and LSTM glucose forecasting models.
+Hyperparameter search for Random Forest, LSTM, Autoencoder, TCN, and
+Transformer glucose forecasting models.
 
 Random Forest grid search uses TimeSeriesSplit cross-validation rather than
 standard k-fold, because k-fold allows future data to leak into training folds
@@ -10,9 +11,13 @@ follows the empirical sensitivity analysis of Probst et al. (2019):
 "Tunability: Importance of Hyperparameters of Machine Learning Algorithms",
 which identifies these three as the most influential for Random Forests.
 
-LSTM grid search sweeps hidden_size and learning rate on a fixed val set.
-The learning rate range [0.001, 0.0005] is centred on the default recommended
-by Kingma & Ba (2015): "Adam: A Method for Stochastic Optimization".
+LSTM, Autoencoder, TCN and Transformer grid searches all sweep their
+respective architecture-defining hyperparameter (hidden_size / latent_size /
+num_filters / d_model) plus learning rate on a fixed validation set, rather
+than cross-validation, because re-training deep learning models for every
+CV fold is prohibitively expensive at this scale. The learning rate range
+[0.001, 0.0005] is centred on the default recommended by Kingma & Ba (2015):
+"Adam: A Method for Stochastic Optimization".
 """
 
 from __future__ import annotations
@@ -22,6 +27,9 @@ from sklearn.model_selection import TimeSeriesSplit
 
 from src.models import random_forest as rf_mod
 from src.models import lstm as lstm_mod
+from src.models import autoencoder as ae_mod
+from src.models import tcn as tcn_mod
+from src.models import transformer as transformer_mod
 from src.evaluation.metrics import rmse
 
 
@@ -171,6 +179,219 @@ def grid_search_lstm(
         # Score in normalised space (consistent ranking — no inverse-transform needed)
         import torch
         import torch.nn as nn
+        device = next(model.parameters()).device
+        X_t = torch.tensor(X_val_3d, dtype=torch.float32).to(device)
+        model.eval()
+        with torch.no_grad():
+            preds = model(X_t).cpu().numpy()
+        score = rmse(y_val, preds)
+
+        if score < best_score:
+            best_score = score
+            best_params = params
+
+    return best_params, best_score
+
+
+# ---------------------------------------------------------------------------
+# Autoencoder (Seq2Seq) — validation-set grid search
+# ---------------------------------------------------------------------------
+
+_AE_PARAM_GRID = {
+    "latent_size": [16, 32, 64],
+    "lr":          [1e-3, 5e-4],
+}
+
+
+def grid_search_autoencoder(
+    X_train_3d: np.ndarray,
+    y_train: np.ndarray,
+    X_val_3d: np.ndarray,
+    y_val: np.ndarray,
+    n_features: int,
+    horizon: int = 6,
+    param_grid: dict | None = None,
+    max_epochs: int = 50,
+    patience: int = 7,
+) -> tuple[dict, float]:
+    """
+    Grid search over Seq2Seq Autoencoder latent_size and learning rate on a
+    fixed validation set. Same rationale and calling convention as
+    grid_search_lstm.
+
+    Returns
+    -------
+    best_params : dict  — e.g. {'latent_size': 32, 'lr': 0.001}
+    best_score  : float — validation RMSE for best_params
+    """
+    import torch
+    from itertools import product
+
+    grid = param_grid if param_grid is not None else _AE_PARAM_GRID
+    keys = list(grid.keys())
+    combos = list(product(*[grid[k] for k in keys]))
+
+    best_score = float("inf")
+    best_params: dict = {}
+
+    for combo in combos:
+        params = dict(zip(keys, combo))
+        latent_size = params["latent_size"]
+        lr = params["lr"]
+
+        model = ae_mod.GlucoseSeq2Seq(
+            n_features=n_features,
+            latent_size=latent_size,
+            horizon=horizon,
+        )
+        model, _ = ae_mod.train_model(
+            X_train_3d, y_train, X_val_3d, y_val,
+            model=model, lr=lr,
+            max_epochs=max_epochs, patience=patience,
+        )
+
+        device = next(model.parameters()).device
+        X_t = torch.tensor(X_val_3d, dtype=torch.float32).to(device)
+        model.eval()
+        with torch.no_grad():
+            preds = model(X_t).cpu().numpy()
+        score = rmse(y_val, preds)
+
+        if score < best_score:
+            best_score = score
+            best_params = params
+
+    return best_params, best_score
+
+
+# ---------------------------------------------------------------------------
+# TCN — validation-set grid search
+# ---------------------------------------------------------------------------
+
+_TCN_PARAM_GRID = {
+    "num_filters": [32, 64, 128],
+    "lr":          [1e-3, 5e-4],
+}
+
+
+def grid_search_tcn(
+    X_train_3d: np.ndarray,
+    y_train: np.ndarray,
+    X_val_3d: np.ndarray,
+    y_val: np.ndarray,
+    n_features: int,
+    horizon: int = 6,
+    param_grid: dict | None = None,
+    max_epochs: int = 50,
+    patience: int = 7,
+) -> tuple[dict, float]:
+    """
+    Grid search over TCN num_filters and learning rate on a fixed
+    validation set. Same rationale and calling convention as grid_search_lstm.
+
+    Returns
+    -------
+    best_params : dict  — e.g. {'num_filters': 64, 'lr': 0.001}
+    best_score  : float — validation RMSE for best_params
+    """
+    import torch
+    from itertools import product
+
+    grid = param_grid if param_grid is not None else _TCN_PARAM_GRID
+    keys = list(grid.keys())
+    combos = list(product(*[grid[k] for k in keys]))
+
+    best_score = float("inf")
+    best_params: dict = {}
+
+    for combo in combos:
+        params = dict(zip(keys, combo))
+        num_filters = params["num_filters"]
+        lr = params["lr"]
+
+        model = tcn_mod.GlucoseTCN(
+            n_features=n_features,
+            num_filters=num_filters,
+            horizon=horizon,
+        )
+        model, _ = tcn_mod.train_model(
+            X_train_3d, y_train, X_val_3d, y_val,
+            model=model, lr=lr,
+            max_epochs=max_epochs, patience=patience,
+        )
+
+        device = next(model.parameters()).device
+        X_t = torch.tensor(X_val_3d, dtype=torch.float32).to(device)
+        model.eval()
+        with torch.no_grad():
+            preds = model(X_t).cpu().numpy()
+        score = rmse(y_val, preds)
+
+        if score < best_score:
+            best_score = score
+            best_params = params
+
+    return best_params, best_score
+
+
+# ---------------------------------------------------------------------------
+# Transformer — validation-set grid search
+# ---------------------------------------------------------------------------
+
+_TRANSFORMER_PARAM_GRID = {
+    "d_model": [32, 64, 128],
+    "lr":      [1e-3, 5e-4],
+}
+
+
+def grid_search_transformer(
+    X_train_3d: np.ndarray,
+    y_train: np.ndarray,
+    X_val_3d: np.ndarray,
+    y_val: np.ndarray,
+    n_features: int,
+    horizon: int = 6,
+    param_grid: dict | None = None,
+    max_epochs: int = 50,
+    patience: int = 7,
+) -> tuple[dict, float]:
+    """
+    Grid search over Transformer d_model and learning rate on a fixed
+    validation set. nhead is fixed at 4 (all d_model candidates divisible
+    by 4). Same rationale and calling convention as grid_search_lstm.
+
+    Returns
+    -------
+    best_params : dict  — e.g. {'d_model': 64, 'lr': 0.001}
+    best_score  : float — validation RMSE for best_params
+    """
+    import torch
+    from itertools import product
+
+    grid = param_grid if param_grid is not None else _TRANSFORMER_PARAM_GRID
+    keys = list(grid.keys())
+    combos = list(product(*[grid[k] for k in keys]))
+
+    best_score = float("inf")
+    best_params: dict = {}
+
+    for combo in combos:
+        params = dict(zip(keys, combo))
+        d_model = params["d_model"]
+        lr = params["lr"]
+
+        model = transformer_mod.GlucoseTransformer(
+            n_features=n_features,
+            d_model=d_model,
+            nhead=4,
+            horizon=horizon,
+        )
+        model, _ = transformer_mod.train_model(
+            X_train_3d, y_train, X_val_3d, y_val,
+            model=model, lr=lr,
+            max_epochs=max_epochs, patience=patience,
+        )
+
         device = next(model.parameters()).device
         X_t = torch.tensor(X_val_3d, dtype=torch.float32).to(device)
         model.eval()

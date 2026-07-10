@@ -38,8 +38,12 @@ def train(
     -------
     Fitted MultiOutputRegressor wrapping a RandomForestRegressor.
     """
+    # RandomForestRegressor already parallelises over its own trees
+    # (n_jobs=-1 in _DEFAULT_PARAMS); wrapping it in another n_jobs=-1
+    # MultiOutputRegressor causes nested process pools that exhaust OS
+    # resources on Windows. Keep the outer wrapper single-process.
     cfg = {**_DEFAULT_PARAMS, **(params or {})}
-    model = MultiOutputRegressor(RandomForestRegressor(**cfg), n_jobs=-1)
+    model = MultiOutputRegressor(RandomForestRegressor(**cfg), n_jobs=1)
     model.fit(X_train, y_train)
     return model
 
