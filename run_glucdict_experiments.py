@@ -126,7 +126,7 @@ for feat_name, feat_cols in FEAT_SETS.items():
             lstm_model = GlucoseLSTM(
                 n_features=n_features, hidden_size=lstm_hs, horizon=HORIZON
             )
-            lstm_model, _ = lstm_train(
+            lstm_model, _, _ = lstm_train(
                 splits_dl["X_train"], splits_dl["y_train"],
                 splits_dl["X_val"],   splits_dl["y_val"],
                 model=lstm_model, lr=lstm_lr,

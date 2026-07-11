@@ -189,6 +189,7 @@ print("SECTION 4 — Main Experiment Loop")
 print("=" * 60)
 
 results_list = []
+epochs_list  = []
 
 pooled = {m: {"pred_30": [], "true_30": []} for m in MODEL_NAMES}
 patient_preds_559 = {}
@@ -238,7 +239,7 @@ for pid in ALL_PATIENTS:
         lstm_lr = gs_results["lstm"].get("lr", 1e-3)
 
         lstm_model = GlucoseLSTM(n_features=n_features, hidden_size=lstm_hs, horizon=HORIZON)
-        lstm_model, _ = lstm_train(
+        lstm_model, _, lstm_epochs = lstm_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
             model=lstm_model, lr=lstm_lr,
@@ -247,7 +248,7 @@ for pid in ALL_PATIENTS:
         ae_latent = gs_results["autoencoder"].get("latent_size", 32)
         ae_lr     = gs_results["autoencoder"].get("lr", 1e-3)
         ae_model = GlucoseSeq2Seq(n_features=n_features, latent_size=ae_latent, horizon=HORIZON)
-        ae_model, _ = ae_train(
+        ae_model, _, ae_epochs = ae_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
             model=ae_model, lr=ae_lr,
@@ -256,7 +257,7 @@ for pid in ALL_PATIENTS:
         tcn_filters = gs_results["tcn"].get("num_filters", 64)
         tcn_lr      = gs_results["tcn"].get("lr", 1e-3)
         tcn_model = GlucoseTCN(n_features=n_features, num_filters=tcn_filters, horizon=HORIZON)
-        tcn_model, _ = tcn_train(
+        tcn_model, _, tcn_epochs = tcn_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
             model=tcn_model, lr=tcn_lr,
@@ -268,11 +269,25 @@ for pid in ALL_PATIENTS:
         tr_model = GlucoseTransformer(
             n_features=n_features, d_model=tr_d_model, nhead=tr_nhead, horizon=HORIZON
         )
-        tr_model, _ = tr_train(
+        tr_model, _, tr_epochs = tr_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
             model=tr_model, lr=tr_lr,
         )
+
+        print(
+            f"epochs [LSTM={lstm_epochs} AE={ae_epochs} "
+            f"TCN={tcn_epochs} Transformer={tr_epochs}] ... ",
+            end="", flush=True,
+        )
+        epochs_list.append({
+            "patient": pid,
+            "cohort": cohort,
+            "lstm_epochs": lstm_epochs,
+            "ae_epochs":   ae_epochs,
+            "tcn_epochs":  tcn_epochs,
+            "tr_epochs":   tr_epochs,
+        })
 
         rf_pred   = rf_model.predict(splits_rf["X_test"]) * y_std + y_mean
         lstm_pred = _dl_predict(lstm_model, splits_dl["X_test"], y_mean, y_std)
@@ -328,6 +343,7 @@ print("SECTION 5 — Results Table")
 print("=" * 60)
 
 results_df = pd.DataFrame(results_list)
+epochs_df  = pd.DataFrame(epochs_list)
 
 sep = "=" * 72
 
@@ -358,6 +374,21 @@ for model_name in MODEL_NAMES:
     a_std  = m["zone_A_pct"].std()
     b_mean = m["zone_B_pct"].mean()
     print(f"  {model_name:12s}  Zone A={a_mean:.1f}% +/- {a_std:.1f}%   Zone B={b_mean:.1f}%")
+
+print()
+print(sep)
+print("TRAINING EPOCHS (early stopping)  mean +/- std, all patients")
+print(sep)
+
+for label, col in [
+    ("LSTM",        "lstm_epochs"),
+    ("Autoencoder", "ae_epochs"),
+    ("TCN",         "tcn_epochs"),
+    ("Transformer", "tr_epochs"),
+]:
+    e_mean = epochs_df[col].mean()
+    e_std  = epochs_df[col].std()
+    print(f"  {label:14s}  epochs: {e_mean:.1f} +/- {e_std:.1f}")
 
 print()
 

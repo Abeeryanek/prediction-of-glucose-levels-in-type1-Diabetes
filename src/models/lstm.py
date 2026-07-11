@@ -66,7 +66,7 @@ def train_model(
     lr: float = 1e-3,
     max_epochs: int = 100,
     patience: int = 10,
-) -> tuple[GlucoseLSTM, dict]:
+) -> tuple[GlucoseLSTM, dict, int]:
     """
     Train a GlucoseLSTM with Adam and early stopping.
 
@@ -81,8 +81,9 @@ def train_model(
 
     Returns
     -------
-    best_model : GlucoseLSTM  — weights from the epoch with lowest val loss
-    history    : dict with keys 'train_loss' and 'val_loss' (lists of floats)
+    best_model    : GlucoseLSTM  — weights from the epoch with lowest val loss
+    history       : dict with keys 'train_loss' and 'val_loss' (lists of floats)
+    actual_epochs : int — number of epochs actually run before early stopping
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
@@ -131,7 +132,8 @@ def train_model(
                 break
 
     model.load_state_dict(best_weights)
-    return model, history
+    actual_epochs = len(history["train_loss"])
+    return model, history, actual_epochs
 
 
 def evaluate(

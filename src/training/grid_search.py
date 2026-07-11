@@ -170,7 +170,7 @@ def grid_search_lstm(
             hidden_size=hidden_size,
             horizon=horizon,
         )
-        model, _ = lstm_mod.train_model(
+        model, _, _ = lstm_mod.train_model(
             X_train_3d, y_train, X_val_3d, y_val,
             model=model, lr=lr,
             max_epochs=max_epochs, patience=patience,
@@ -244,7 +244,7 @@ def grid_search_autoencoder(
             latent_size=latent_size,
             horizon=horizon,
         )
-        model, _ = ae_mod.train_model(
+        model, _, _ = ae_mod.train_model(
             X_train_3d, y_train, X_val_3d, y_val,
             model=model, lr=lr,
             max_epochs=max_epochs, patience=patience,
@@ -314,7 +314,7 @@ def grid_search_tcn(
             num_filters=num_filters,
             horizon=horizon,
         )
-        model, _ = tcn_mod.train_model(
+        model, _, _ = tcn_mod.train_model(
             X_train_3d, y_train, X_val_3d, y_val,
             model=model, lr=lr,
             max_epochs=max_epochs, patience=patience,
@@ -386,7 +386,7 @@ def grid_search_transformer(
             nhead=4,
             horizon=horizon,
         )
-        model, _ = transformer_mod.train_model(
+        model, _, _ = transformer_mod.train_model(
             X_train_3d, y_train, X_val_3d, y_val,
             model=model, lr=lr,
             max_epochs=max_epochs, patience=patience,

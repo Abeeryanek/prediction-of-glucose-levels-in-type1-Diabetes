@@ -43,13 +43,13 @@ class GlucoseSeq2Seq(nn.Module):
     Bottleneck
     ----------
     The last-layer hidden state is compressed:
-        z = bottleneck(h_n[-1])          # (batch, latent_size)
+        z = bottleneck(h_n[-1])
 
     Decoder initialisation
     ----------------------
     The latent vector is expanded back to initialise the decoder hidden state:
-        dec_h0 = z_to_dec(z).view(num_layers, batch, hidden_size)   # h_0
-        dec_c0 = zeros_like(dec_h0)                                  # c_0
+        dec_h0 = z_to_dec(z).view(num_layers, batch, hidden_size)
+        dec_c0 = zeros_like(dec_h0)
 
     Decoding (autoregressive)
     -------------------------
@@ -95,7 +95,7 @@ class GlucoseSeq2Seq(nn.Module):
         self.z_to_dec = nn.Linear(latent_size, hidden_size * num_layers)
 
         self.decoder = nn.LSTM(
-            input_size=1,           # receives one glucose value per step
+            input_size=1,  # receives one glucose value per step
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,
@@ -118,17 +118,16 @@ class GlucoseSeq2Seq(nn.Module):
         # ── Encode ──────────────────────────────────────────────────────────
         _, (h_n, _) = self.encoder(x)
         # h_n: (num_layers, batch, hidden_size) — take the top layer
-        h_last = h_n[-1]                             # (batch, hidden_size)
+        h_last = h_n[-1]
 
         # ── Bottleneck ───────────────────────────────────────────────────────
-        z = self.bottleneck(h_last)                  # (batch, latent_size)
+        z = self.bottleneck(h_last)
 
         # ── Decoder initialisation ───────────────────────────────────────────
-        dec_init = self.z_to_dec(z)                  # (batch, hidden_size * num_layers)
+        dec_init = self.z_to_dec(z)
         # Reshape to (num_layers, batch, hidden_size) required by nn.LSTM
         h_0 = (
-            dec_init
-            .view(batch, self.num_layers, self.hidden_size)
+            dec_init.view(batch, self.num_layers, self.hidden_size)
             .permute(1, 0, 2)
             .contiguous()
         )
@@ -136,18 +135,18 @@ class GlucoseSeq2Seq(nn.Module):
 
         # ── Autoregressive decoding ──────────────────────────────────────────
         # Seed: last known glucose value in the input window
-        dec_input = x[:, -1:, 0:1]                  # (batch, 1, 1)
+        dec_input = x[:, -1:, 0:1]
         h, c = h_0, c_0
         predictions: list[torch.Tensor] = []
 
         for _ in range(self.horizon):
             out, (h, c) = self.decoder(dec_input, (h, c))
             # out: (batch, 1, hidden_size)
-            pred = self.output_layer(out[:, 0, :])   # (batch, 1)
+            pred = self.output_layer(out[:, 0, :])
             predictions.append(pred)
-            dec_input = pred.unsqueeze(1)            # feed prediction as next input
+            dec_input = pred.unsqueeze(1)
 
-        return torch.cat(predictions, dim=1)         # (batch, horizon)
+        return torch.cat(predictions, dim=1)
 
 
 def train_model(
@@ -159,7 +158,7 @@ def train_model(
     lr: float = 1e-3,
     max_epochs: int = 100,
     patience: int = 10,
-) -> tuple[GlucoseSeq2Seq, dict]:
+) -> tuple[GlucoseSeq2Seq, dict, int]:
     """
     Train a GlucoseSeq2Seq model with Adam and early stopping.
 
@@ -177,7 +176,9 @@ def train_model(
 
     Returns
     -------
-    best_model, history   where history = {'train_loss': [...], 'val_loss': [...]}
+    best_model, history, actual_epochs
+        history = {'train_loss': [...], 'val_loss': [...]}
+        actual_epochs = number of epochs actually run before early stopping
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
@@ -226,7 +227,8 @@ def train_model(
                 break
 
     model.load_state_dict(best_weights)
-    return model, history
+    actual_epochs = len(history["train_loss"])
+    return model, history, actual_epochs
 
 
 def evaluate(
