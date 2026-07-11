@@ -28,6 +28,9 @@ from src.preprocessing.glucdict_loader import load_patient, ALL_USERS, GLUCDICT_
 from src.training.pipeline import make_splits
 from src.models import random_forest as rf
 from src.models.lstm import GlucoseLSTM, train_model as lstm_train
+from src.models.autoencoder import GlucoseSeq2Seq, train_model as ae_train
+from src.models.tcn import GlucoseTCN, train_model as tcn_train
+from src.models.transformer import GlucoseTransformer, train_model as tr_train
 from src.evaluation.metrics import rmse, mae, clarke_error_grid
 from src.evaluation.plots import plot_clarke_error_grid
 
@@ -263,5 +266,164 @@ print(f"\nSaved: {ceg_grid_path}")
 ceg_csv_path = f"{RESULTS_DIR}/clarke_glucdict_ablation.csv"
 pd.DataFrame(ceg_rows).to_csv(ceg_csv_path, index=False)
 print(f"Saved: {ceg_csv_path}")
+
+print("\nDone.")
+
+# ── SECTION 2 — 5-Model Comparison (glucose_only) ──────────────────────────────
+# The ablation above already showed glucose_only/glucose_activity beat every
+# feature set that adds wearable sensors (heartrate, accelerometer) on
+# Glucdict — same pattern as OhioT1DM. glucose_only gives the cleanest,
+# feature-identical comparison across all 5 architectures, reusing the
+# RF/LSTM hyperparameters above plus the OhioT1DM grid search results for
+# Autoencoder, TCN, and Transformer (no Glucdict-specific tuning yet).
+print()
+print("=" * 60)
+print("SECTION 2 — Glucdict 5-Model Comparison (glucose_only)")
+print("=" * 60)
+
+GLUCOSE_ONLY = ["glucose"]
+
+ae_latent   = gs["autoencoder"]["latent_size"]
+ae_lr       = gs["autoencoder"]["lr"]
+tcn_filters = gs["tcn"]["num_filters"]
+tcn_lr      = gs["tcn"]["lr"]
+tr_d_model  = gs["transformer"]["d_model"]
+tr_nhead    = gs["transformer"].get("nhead", 4)
+tr_lr       = gs["transformer"]["lr"]
+
+print(f"RF         : {rf_params}")
+print(f"LSTM       : hidden_size={lstm_hs}, lr={lstm_lr}")
+print(f"Autoencoder: latent_size={ae_latent}, lr={ae_lr}")
+print(f"TCN        : num_filters={tcn_filters}, lr={tcn_lr}")
+print(f"Transformer: d_model={tr_d_model}, nhead={tr_nhead}, lr={tr_lr}")
+print()
+
+MODEL_NAMES_5 = ["RF", "LSTM", "Autoencoder", "TCN", "Transformer"]
+results_5model = []
+
+
+def _dl_predict_30(model):
+    model.eval().to(device)
+    X_t = torch.tensor(splits_dl["X_test"], dtype=torch.float32).to(device)
+    with torch.no_grad():
+        return (model(X_t).cpu().numpy() * y_std + y_mean)[:, STEP_30MIN]
+
+
+for pid in cohort:
+    print(f"[{pid}] ... ", end="", flush=True)
+    try:
+        splits_rf = make_splits(
+            train_data[pid], test_data[pid], GLUCOSE_ONLY,
+            horizon_steps=HORIZON, multi_step=True, flat=True,
+        )
+        splits_dl = make_splits(
+            train_data[pid], test_data[pid], GLUCOSE_ONLY,
+            horizon_steps=HORIZON, multi_step=True, flat=False,
+        )
+
+        glucose_idx = GLUCOSE_ONLY.index("glucose")
+        y_mean      = float(splits_dl["scaler"].mean_[glucose_idx])
+        y_std       = float(splits_dl["scaler"].scale_[glucose_idx])
+        y_true_30   = splits_dl["y_test_raw"][:, STEP_30MIN]
+        n_features  = splits_dl["X_train"].shape[2]
+
+        # ── Random Forest ─────────────────────────────────────────────────
+        rf_model = rf.train(splits_rf["X_train"], splits_rf["y_train"], params=rf_params)
+        rf_pred_30 = (rf_model.predict(splits_rf["X_test"]) * y_std + y_mean)[:, STEP_30MIN]
+
+        # ── LSTM ──────────────────────────────────────────────────────────
+        lstm_model = GlucoseLSTM(n_features=n_features, hidden_size=lstm_hs, horizon=HORIZON)
+        lstm_model, _, lstm_epochs = lstm_train(
+            splits_dl["X_train"], splits_dl["y_train"],
+            splits_dl["X_val"],   splits_dl["y_val"],
+            model=lstm_model, lr=lstm_lr,
+        )
+
+        # ── Autoencoder ───────────────────────────────────────────────────
+        ae_model = GlucoseSeq2Seq(n_features=n_features, latent_size=ae_latent, horizon=HORIZON)
+        ae_model, _, ae_epochs = ae_train(
+            splits_dl["X_train"], splits_dl["y_train"],
+            splits_dl["X_val"],   splits_dl["y_val"],
+            model=ae_model, lr=ae_lr,
+        )
+
+        # ── TCN ───────────────────────────────────────────────────────────
+        tcn_model = GlucoseTCN(n_features=n_features, num_filters=tcn_filters, horizon=HORIZON)
+        tcn_model, _, tcn_epochs = tcn_train(
+            splits_dl["X_train"], splits_dl["y_train"],
+            splits_dl["X_val"],   splits_dl["y_val"],
+            model=tcn_model, lr=tcn_lr,
+        )
+
+        # ── Transformer ───────────────────────────────────────────────────
+        tr_model = GlucoseTransformer(
+            n_features=n_features, d_model=tr_d_model, nhead=tr_nhead, horizon=HORIZON
+        )
+        tr_model, _, tr_epochs = tr_train(
+            splits_dl["X_train"], splits_dl["y_train"],
+            splits_dl["X_val"],   splits_dl["y_val"],
+            model=tr_model, lr=tr_lr,
+        )
+
+        preds_30 = {
+            "RF":          rf_pred_30,
+            "LSTM":        _dl_predict_30(lstm_model),
+            "Autoencoder": _dl_predict_30(ae_model),
+            "TCN":         _dl_predict_30(tcn_model),
+            "Transformer": _dl_predict_30(tr_model),
+        }
+        epochs_map = {
+            "RF": None, "LSTM": lstm_epochs, "Autoencoder": ae_epochs,
+            "TCN": tcn_epochs, "Transformer": tr_epochs,
+        }
+
+        rmse_map = {}
+        for model_name in MODEL_NAMES_5:
+            pred_30 = preds_30[model_name]
+            rmse_val = rmse(y_true_30, pred_30)
+            rmse_map[model_name] = rmse_val
+            results_5model.append({
+                "user":       pid,
+                "model":      model_name,
+                "rmse":       rmse_val,
+                "mae":        mae(y_true_30, pred_30),
+                "zone_a_pct": clarke_error_grid(y_true_30, pred_30)["percentages"]["A"],
+                "epochs":     epochs_map[model_name],
+            })
+
+        print(
+            "RF={:.2f}  LSTM={:.2f}  AE={:.2f}  TCN={:.2f}  Tr={:.2f}".format(
+                rmse_map["RF"], rmse_map["LSTM"], rmse_map["Autoencoder"],
+                rmse_map["TCN"], rmse_map["Transformer"],
+            )
+        )
+
+    except Exception as exc:
+        print(f"ERROR — {exc}")
+
+print()
+print("5-model comparison loop complete.")
+
+# ── Summary table ─────────────────────────────────────────────────────────────
+results_df_5 = pd.DataFrame(results_5model)
+
+csv_path_5 = f"{RESULTS_DIR}/results_glucdict_5models.csv"
+results_df_5.to_csv(csv_path_5, index=False)
+print(f"\nSaved: {csv_path_5}")
+
+sep5 = "=" * 68
+print()
+print(sep5)
+print(f"GLUCDICT 5-MODEL COMPARISON — glucose_only, 30-min horizon "
+      f"(mean, up to {N_PATIENTS} users)")
+print(sep5)
+print(f"  {'Model':14s}  {'Mean RMSE':>10s}  {'Mean MAE':>10s}  {'Mean Zone A':>12s}")
+print("  " + "-" * 54)
+for model_name in MODEL_NAMES_5:
+    sub = results_df_5[results_df_5["model"] == model_name]
+    print(
+        f"  {model_name:14s}  {sub['rmse'].mean():10.2f}  "
+        f"{sub['mae'].mean():10.2f}  {sub['zone_a_pct'].mean():11.1f}%"
+    )
 
 print("\nDone.")
