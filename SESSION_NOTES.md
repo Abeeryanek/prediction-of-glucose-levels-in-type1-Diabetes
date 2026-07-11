@@ -1,44 +1,32 @@
-## Session Summary — Latest
+## All 4 Remaining Tasks — COMPLETED
 
-### Everything completed and committed
-- 5 models: RF, LSTM, Autoencoder, TCN, Transformer
-- Grid Search: all 5 models tuned (results in grid_search_results.json)
-- OhioT1DM full experiment: results_all_models.csv committed
-- Clean feature ablation (without 563+575): committed
-- Glucdict: loader + experiments committed
-- Clarke Error Grid for every feature combination, both datasets: committed
-  (results/ohio/clarke_ablation_clean_all_featuresets.png,
-  results/glucdict/clarke_glucdict_all_featuresets.png)
-- Fixed a Random Forest bug: nested joblib parallelism (MultiOutputRegressor
-  n_jobs=-1 wrapping RandomForestRegressor n_jobs=-1) was crashing on Windows
-  with OS resource exhaustion — outer wrapper now n_jobs=1
+### Task 1: Training epochs documented
+All 4 DL model train_model() functions return actual_epochs.
+run_experiments.py reports mean +/- std epochs per model.
 
-### Tuned hyperparameters
-  RF:          n_estimators=200, max_depth=10, min_samples_leaf=4
-  LSTM:        hidden_size=128, lr=5e-4
-  Autoencoder: latent_size=16, lr=5e-4
-  TCN:         num_filters=32, lr=5e-4
-  Transformer: d_model=128, nhead=4, lr=5e-4
+### Task 2: OhioT1DM 2020 cohort acceleration features
+run_ablation_2020.py — acceleration hurts exactly like heartrate/steps.
+Also fixed critical loader bug: empty <basis_heart_rate> placeholder
+in 2020 XML files was misclassifying cohort. Fixed in ohio_loader.py.
 
-### Key findings this session
-- glucose_only ≈ clinical on both datasets — bolus/carbs/meal-events add
-  almost nothing at the 30-min horizon
-- full/wearable feature sets are consistently worst AND highest-variance on
-  both OhioT1DM and Glucdict — extra heartrate/accelerometer features hurt,
-  not help; confirmed via RMSE and Clarke Zone A/D (Zone A drops from 88.6%
-  to 75.6% on Ohio, with 1.5% landing in dangerous Zone D)
-- Tuned Transformer (22.91 mg/dL @ 30min) now beats RF and TCN — was worse
-  than both when untuned/hardcoded
+### Task 3: Leave-One-Patient-Out cross-validation
+run_lopo.py — LSTM degrades only 1.17 mg/dL (5.5%) from personalised
+to population. RF improves by 0.54 mg/dL with pooling.
 
-### Not yet committed
-- PRESENTATION_MONDAY.md / .pptx / make_pptx.py — content is fully updated
-  with this session's results (15 slides), just needs `git add` + commit
-  when ready
+### Task 4: Glucdict all 5 models
+run_glucdict_experiments.py extended — AE=14.01, LSTM=14.03,
+Transformer=14.09, RF=15.23, TCN=15.90 mg/dL.
 
-### Tomorrow — in this exact order
-1. Preprocessing comparison table vs literature
-   Create a markdown/CSV table comparing our steps to the papers
+### Task 5: Cross-dataset transfer learning
+run_transfer.py — domain shift costs only +1.44/+1.92 mg/dL despite
+different populations and CGM devices.
 
-2. Detailed final experiments plan document
+### Key Scientific Narrative (3 findings for presentation)
+1. Wearable features consistently hurt at 30-min horizon (OhioT1DM
+   2018, OhioT1DM 2020, Glucdict — all three datasets)
+2. Personalisation barely matters — LOPO gap only 1.17 mg/dL
+3. Transfer across datasets costs only ~1-2 mg/dL — glucose
+   autocorrelation dominates regardless of population or device
 
-3. Commit presentation files (see "Not yet committed" above)
+### Next: BUILD PRESENTATION
+All experiments done. Now need presentation for next meeting.
