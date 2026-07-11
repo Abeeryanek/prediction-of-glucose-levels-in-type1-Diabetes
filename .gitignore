@@ -1,1 +1,30 @@
 .venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Raw datasets (too large for git — loaded at runtime from local path)
+Glucdict Dataset/
+Glucdict Dataset.zip
+
+# Scratch and build files
+make_pptx.py
+scratchpad/
+
+# Log and error capture files from background runs
+run_*_log.txt
+run_*_err.txt
+*.log
+lopo_log.txt
+ablation_log.txt
+
+# OS and IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Keep all result files — they are small and important
+!results/
