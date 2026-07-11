@@ -19,6 +19,9 @@ run_*_err.txt
 *.log
 lopo_log.txt
 ablation_log.txt
+*_log.txt
+*_err.txt
+run_err.txt
 
 # OS and IDE
 .DS_Store
