@@ -1,7 +1,10 @@
-"""Regression and clinical accuracy metrics for CGM forecast evaluation."""
+"""Regression and clinical accuracy metrics for CGM forecast evaluation.
 
+Unified implementation agreed between Khalil and Abeer.
+Clarke Error Grid follows Clarke et al. (2005),
+Diabetes Technology & Therapeutics 7(5):776-779.
+"""
 from __future__ import annotations
-
 import numpy as np
 
 
@@ -35,35 +38,38 @@ def clarke_zone(r: float, p: float) -> str:
 
     Zone definitions
     ----------------
-    A — clinically accurate: within 20 % of reference, or both hypoglycaemic
+    A — clinically accurate: within 20% of reference, or both hypoglycaemic
     B — clinically acceptable: erroneous but would not cause incorrect treatment
     C — overcorrection: prediction triggers unnecessary corrective treatment
     D — dangerous failure: clinically significant glucose level not detected
-    E — erroneous treatment: prediction leads to treatment in the wrong direction
+    E — erroneous treatment: prediction leads to treatment in wrong direction
     """
-    # Zone E: treatment direction reversed
+    # Zone E: treatment direction reversed (most dangerous)
     if r <= 70 and p >= 180:
         return "E"
     if r >= 180 and p <= 70:
         return "E"
 
     # Zone A: clinically accurate
-    if r < 70 and p < 70:          # both in hypoglycaemic range
+    if r < 70 and p < 70:
         return "A"
     if abs(p - r) / max(r, 1.0) <= 0.20:
         return "A"
 
     # Zone D: dangerous failure to detect extreme glucose
-    if r >= 240 and 70 < p <= 180:   # severe hyperglycaemia not detected as hyper
+    # Hyperglycaemia not detected: actual severe hyper, predicted normal
+    if r >= 240 and 70 < p <= 180:
         return "D"
-    if r <= 70 and 120 <= p <= 180:  # hypoglycaemia not detected (prediction looks normal)
+    # Hypoglycaemia not detected: actual hypo, predicted normal or near-normal
+    # Full range 70 < p <= 180 — covers both 70-120 and 120-180 sub-ranges
+    if r <= 70 and 70 < p <= 180:
         return "D"
 
     # Zone C: overcorrection
-    # Over-prediction in low-normal range → unnecessary carbohydrate treatment
+    # Over-prediction in low-normal range
     if 70 <= r <= 290 and p > r + 110:
         return "C"
-    # Under-prediction of borderline-high glucose → excess carbs administered
+    # Under-prediction of borderline-high glucose
     if r >= 130 and p <= 70:
         return "C"
 
@@ -82,18 +88,20 @@ def clarke_error_grid(ref: np.ndarray, pred: np.ndarray) -> dict:
 
     Returns
     -------
-    dict
+    dict with keys:
         'counts'      — {zone: int}   absolute count per zone
         'percentages' — {zone: float} percentage of pairs per zone
     """
-    ref = np.asarray(ref).ravel()
+    ref  = np.asarray(ref).ravel()
     pred = np.asarray(pred).ravel()
     if ref.shape != pred.shape:
-        raise ValueError(f"ref and pred must have the same shape, got {ref.shape} vs {pred.shape}.")
-
+        raise ValueError(
+            f"ref and pred must have the same shape, "
+            f"got {ref.shape} vs {pred.shape}."
+        )
     zones = [clarke_zone(float(r), float(p)) for r, p in zip(ref, pred)]
     n = len(zones)
-    counts = {z: zones.count(z) for z in "ABCDE"}
+    counts      = {z: zones.count(z) for z in "ABCDE"}
     percentages = {z: 100.0 * counts[z] / n for z in "ABCDE"}
     return {"counts": counts, "percentages": percentages}
 
@@ -116,3 +124,7 @@ def per_horizon_metrics(
     List of floats, one value per horizon step.
     """
     return [metric_fn(y_true[:, h], y_pred[:, h]) for h in range(y_true.shape[1])]
+
+
+# Backward-compatible alias so existing callers still work
+_clarke_zone = clarke_zone
