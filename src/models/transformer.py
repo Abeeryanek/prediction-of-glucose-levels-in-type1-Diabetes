@@ -136,7 +136,7 @@ def train_model(
     lr: float = 1e-3,
     max_epochs: int = 100,
     patience: int = 10,
-) -> tuple[GlucoseTransformer, dict]:
+) -> tuple[GlucoseTransformer, dict, int]:
     """
     Train a GlucoseTransformer with Adam and early stopping.
 
@@ -153,7 +153,9 @@ def train_model(
 
     Returns
     -------
-    best_model, history   where history = {'train_loss': [...], 'val_loss': [...]}
+    best_model, history, actual_epochs
+        history = {'train_loss': [...], 'val_loss': [...]}
+        actual_epochs = number of epochs actually run before early stopping
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
@@ -202,7 +204,8 @@ def train_model(
                 break
 
     model.load_state_dict(best_weights)
-    return model, history
+    actual_epochs = len(history["train_loss"])
+    return model, history, actual_epochs
 
 
 def evaluate(

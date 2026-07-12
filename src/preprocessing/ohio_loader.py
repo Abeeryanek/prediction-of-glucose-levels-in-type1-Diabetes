@@ -123,7 +123,15 @@ def load_patient(xml_path: Path | str) -> pd.DataFrame:
     _merge_sensor(skin_temp, "skin_temp")
 
     # ── Cohort-specific signals ──────────────────────────────────────────────
-    if root.find("basis_heart_rate") is not None:
+    # Both cohorts' XML schemas declare all wristband tags, but only one
+    # device's tag actually contains <event> children — the other cohort's
+    # tag is present as an empty placeholder. Checking node presence alone
+    # (root.find(...) is not None) misclassifies 2020-cohort files, since
+    # their empty <basis_heart_rate> node still satisfies "is not None".
+    hr_node = root.find("basis_heart_rate")
+    has_hr_events = hr_node is not None and len(hr_node.findall("event")) > 0
+
+    if has_hr_events:
         # 2018 cohort — Basis wristband
         hr = _parse_value_events(root, "basis_heart_rate", "value").rename(
             columns={"value": "heartrate"}
@@ -133,12 +141,15 @@ def load_patient(xml_path: Path | str) -> pd.DataFrame:
         )
         _merge_sensor(hr, "heartrate")
         _merge_sensor(steps, "steps")
-    elif root.find("acceleration") is not None:
-        # 2020 cohort — Empatica Embrace
-        accel = _parse_value_events(root, "acceleration", "value").rename(
-            columns={"value": "acceleration"}
-        )
-        _merge_sensor(accel, "acceleration")
+    else:
+        accel_node = root.find("acceleration")
+        has_accel_events = accel_node is not None and len(accel_node.findall("event")) > 0
+        if has_accel_events:
+            # 2020 cohort — Empatica Embrace
+            accel = _parse_value_events(root, "acceleration", "value").rename(
+                columns={"value": "acceleration"}
+            )
+            _merge_sensor(accel, "acceleration")
 
     return df.reset_index()
 

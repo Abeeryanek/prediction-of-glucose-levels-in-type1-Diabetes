@@ -1,32 +1,32 @@
-## Session Summary — Latest Update
+## All 4 Remaining Tasks — COMPLETED
 
-### Completed today
-- Transformer model implemented (src/models/transformer.py)
-  Vaswani et al. 2017 / Xiong et al. 2025 / Kalita & Mirza 2025
-- Glucdict dataset loader implemented (src/preprocessing/glucdict_loader.py)
-  13 users, Dexcom G6 CGM + TicWatch heart rate + accelerometer + activity logs
-  Smoke test passed: User1 shape (2838, 6)
-- Full 5-model OhioT1DM experiment completed and committed (7d50788)
-- Abeer's branch merged cleanly into main
+### Task 1: Training epochs documented
+All 4 DL model train_model() functions return actual_epochs.
+run_experiments.py reports mean +/- std epochs per model.
 
-### 5-Model Results (30-min horizon, 12 patients)
-  Autoencoder:  21.45 ± 3.52  Zone A: 87.4%
-  LSTM:         ~21.25         Zone A: 87.2%
-  Transformer:  23.01 ± 4.05  Zone A: 84.7%
-  RF:           ~23.35         Zone A: ~86.4%
-  TCN:          24.82 ± 3.65  Zone A: 81.3%
+### Task 2: OhioT1DM 2020 cohort acceleration features
+run_ablation_2020.py — acceleration hurts exactly like heartrate/steps.
+Also fixed critical loader bug: empty <basis_heart_rate> placeholder
+in 2020 XML files was misclassifying cohort. Fixed in ohio_loader.py.
 
-### Tomorrow — in this exact order
-1. Run run_feature_ablation_clean.py
-   (re-run without patients 563+575 — professor's request)
-   Create the file first, then: python -u run_feature_ablation_clean.py
+### Task 3: Leave-One-Patient-Out cross-validation
+run_lopo.py — LSTM degrades only 1.17 mg/dL (5.5%) from personalised
+to population. RF improves by 0.54 mg/dL with pooling.
 
-2. Create run_glucdict_experiments.py and run it
-   Feature sets to test: glucose_only, glucose_hr,
-   glucose_activity, full_wearable
+### Task 4: Glucdict all 5 models
+run_glucdict_experiments.py extended — AE=14.01, LSTM=14.03,
+Transformer=14.09, RF=15.23, TCN=15.90 mg/dL.
 
-3. Expand Grid Search to all 5 models (AE, TCN, Transformer)
+### Task 5: Cross-dataset transfer learning
+run_transfer.py — domain shift costs only +1.44/+1.92 mg/dL despite
+different populations and CGM devices.
 
-4. Clarke Error Grid for ALL feature combinations
+### Key Scientific Narrative (3 findings for presentation)
+1. Wearable features consistently hurt at 30-min horizon (OhioT1DM
+   2018, OhioT1DM 2020, Glucdict — all three datasets)
+2. Personalisation barely matters — LOPO gap only 1.17 mg/dL
+3. Transfer across datasets costs only ~1-2 mg/dL — glucose
+   autocorrelation dominates regardless of population or device
 
-5. Prepare presentation for next meeting
+### Next: BUILD PRESENTATION
+All experiments done. Now need presentation for next meeting.

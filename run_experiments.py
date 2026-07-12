@@ -24,7 +24,10 @@ from src.preprocessing.ohio_loader import (
     load_patient, load_split, COHORT_2018, COHORT_2020
 )
 from src.training.pipeline import make_splits, walk_forward_splits
-from src.training.grid_search import grid_search_rf, grid_search_lstm
+from src.training.grid_search import (
+    grid_search_rf, grid_search_lstm,
+    grid_search_autoencoder, grid_search_tcn, grid_search_transformer,
+)
 from src.models import random_forest as rf
 from src.models.lstm import GlucoseLSTM, train_model as lstm_train, evaluate as lstm_eval
 from src.models.autoencoder import GlucoseSeq2Seq, train_model as ae_train, evaluate as ae_eval
@@ -99,44 +102,84 @@ if GS_PATH.exists():
         gs_results = json.load(f)
     print("Loaded existing grid search results from", GS_PATH)
 else:
-    print("Running grid search on patient 559 ...")
+    gs_results = {}
+
+missing = [m for m in ("rf", "lstm", "autoencoder", "tcn", "transformer") if m not in gs_results]
+
+if missing:
+    print(f"Running grid search on patient 559 for: {missing} ...")
 
     splits_gs_rf = make_splits(
         train_data["559"], test_data["559"],
         CLINICAL_FEATURES, horizon_steps=HORIZON,
         multi_step=True, flat=True,
     )
-    best_rf_params, best_rf_score = grid_search_rf(
-        splits_gs_rf["X_train"], splits_gs_rf["y_train"]
-    )
-    print(f"  RF   best params : {best_rf_params}")
-    print(f"  RF   RMSE (norm) : {best_rf_score:.4f}")
-
     splits_gs_dl = make_splits(
         train_data["559"], test_data["559"],
         CLINICAL_FEATURES, horizon_steps=HORIZON,
         multi_step=True, flat=False,
     )
     n_feat_gs = splits_gs_dl["X_train"].shape[2]
-    best_lstm_params, best_lstm_score = grid_search_lstm(
-        splits_gs_dl["X_train"], splits_gs_dl["y_train"],
-        splits_gs_dl["X_val"],   splits_gs_dl["y_val"],
-        n_features=n_feat_gs, horizon=HORIZON,
-    )
-    print(f"  LSTM best params : {best_lstm_params}")
-    print(f"  LSTM RMSE (norm) : {best_lstm_score:.4f}")
 
-    gs_results = {"rf": best_rf_params, "lstm": best_lstm_params}
+    if "rf" in missing:
+        best_rf_params, best_rf_score = grid_search_rf(
+            splits_gs_rf["X_train"], splits_gs_rf["y_train"]
+        )
+        print(f"  RF          best params : {best_rf_params}")
+        print(f"  RF          RMSE (norm) : {best_rf_score:.4f}")
+        gs_results["rf"] = best_rf_params
+
+    if "lstm" in missing:
+        best_lstm_params, best_lstm_score = grid_search_lstm(
+            splits_gs_dl["X_train"], splits_gs_dl["y_train"],
+            splits_gs_dl["X_val"],   splits_gs_dl["y_val"],
+            n_features=n_feat_gs, horizon=HORIZON,
+        )
+        print(f"  LSTM        best params : {best_lstm_params}")
+        print(f"  LSTM        RMSE (norm) : {best_lstm_score:.4f}")
+        gs_results["lstm"] = best_lstm_params
+
+    if "autoencoder" in missing:
+        best_ae_params, best_ae_score = grid_search_autoencoder(
+            splits_gs_dl["X_train"], splits_gs_dl["y_train"],
+            splits_gs_dl["X_val"],   splits_gs_dl["y_val"],
+            n_features=n_feat_gs, horizon=HORIZON,
+        )
+        print(f"  Autoencoder best params : {best_ae_params}")
+        print(f"  Autoencoder RMSE (norm) : {best_ae_score:.4f}")
+        gs_results["autoencoder"] = best_ae_params
+
+    if "tcn" in missing:
+        best_tcn_params, best_tcn_score = grid_search_tcn(
+            splits_gs_dl["X_train"], splits_gs_dl["y_train"],
+            splits_gs_dl["X_val"],   splits_gs_dl["y_val"],
+            n_features=n_feat_gs, horizon=HORIZON,
+        )
+        print(f"  TCN         best params : {best_tcn_params}")
+        print(f"  TCN         RMSE (norm) : {best_tcn_score:.4f}")
+        gs_results["tcn"] = best_tcn_params
+
+    if "transformer" in missing:
+        best_tr_params, best_tr_score = grid_search_transformer(
+            splits_gs_dl["X_train"], splits_gs_dl["y_train"],
+            splits_gs_dl["X_val"],   splits_gs_dl["y_val"],
+            n_features=n_feat_gs, horizon=HORIZON,
+        )
+        best_tr_params["nhead"] = 4
+        print(f"  Transformer best params : {best_tr_params}")
+        print(f"  Transformer RMSE (norm) : {best_tr_score:.4f}")
+        gs_results["transformer"] = best_tr_params
+
     with open(GS_PATH, "w") as f:
         json.dump(gs_results, f, indent=2)
     print("Grid search results saved to", GS_PATH)
-
-gs_results["transformer"] = {"d_model": 64, "nhead": 4, "lr": 0.001}
 
 print()
 print("Best parameters:")
 print("  RF         :", gs_results["rf"])
 print("  LSTM       :", gs_results["lstm"])
+print("  Autoencoder:", gs_results["autoencoder"])
+print("  TCN        :", gs_results["tcn"])
 print("  Transformer:", gs_results["transformer"])
 
 # ── Section 4 — Main Experiment Loop ─────────────────────────────────────────
@@ -146,6 +189,7 @@ print("SECTION 4 — Main Experiment Loop")
 print("=" * 60)
 
 results_list = []
+epochs_list  = []
 
 pooled = {m: {"pred_30": [], "true_30": []} for m in MODEL_NAMES}
 patient_preds_559 = {}
@@ -195,32 +239,55 @@ for pid in ALL_PATIENTS:
         lstm_lr = gs_results["lstm"].get("lr", 1e-3)
 
         lstm_model = GlucoseLSTM(n_features=n_features, hidden_size=lstm_hs, horizon=HORIZON)
-        lstm_model, _ = lstm_train(
+        lstm_model, _, lstm_epochs = lstm_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
             model=lstm_model, lr=lstm_lr,
         )
 
-        ae_model = GlucoseSeq2Seq(n_features=n_features, horizon=HORIZON)
-        ae_model, _ = ae_train(
+        ae_latent = gs_results["autoencoder"].get("latent_size", 32)
+        ae_lr     = gs_results["autoencoder"].get("lr", 1e-3)
+        ae_model = GlucoseSeq2Seq(n_features=n_features, latent_size=ae_latent, horizon=HORIZON)
+        ae_model, _, ae_epochs = ae_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
-            model=ae_model, lr=lstm_lr,
+            model=ae_model, lr=ae_lr,
         )
 
-        tcn_model = GlucoseTCN(n_features=n_features, horizon=HORIZON)
-        tcn_model, _ = tcn_train(
+        tcn_filters = gs_results["tcn"].get("num_filters", 64)
+        tcn_lr      = gs_results["tcn"].get("lr", 1e-3)
+        tcn_model = GlucoseTCN(n_features=n_features, num_filters=tcn_filters, horizon=HORIZON)
+        tcn_model, _, tcn_epochs = tcn_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
-            model=tcn_model, lr=lstm_lr,
+            model=tcn_model, lr=tcn_lr,
         )
 
-        tr_model = GlucoseTransformer(n_features=n_features, horizon=HORIZON)
-        tr_model, _ = tr_train(
+        tr_d_model = gs_results["transformer"].get("d_model", 64)
+        tr_nhead   = gs_results["transformer"].get("nhead", 4)
+        tr_lr      = gs_results["transformer"].get("lr", 1e-3)
+        tr_model = GlucoseTransformer(
+            n_features=n_features, d_model=tr_d_model, nhead=tr_nhead, horizon=HORIZON
+        )
+        tr_model, _, tr_epochs = tr_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
-            model=tr_model, lr=gs_results["transformer"]["lr"],
+            model=tr_model, lr=tr_lr,
         )
+
+        print(
+            f"epochs [LSTM={lstm_epochs} AE={ae_epochs} "
+            f"TCN={tcn_epochs} Transformer={tr_epochs}] ... ",
+            end="", flush=True,
+        )
+        epochs_list.append({
+            "patient": pid,
+            "cohort": cohort,
+            "lstm_epochs": lstm_epochs,
+            "ae_epochs":   ae_epochs,
+            "tcn_epochs":  tcn_epochs,
+            "tr_epochs":   tr_epochs,
+        })
 
         rf_pred   = rf_model.predict(splits_rf["X_test"]) * y_std + y_mean
         lstm_pred = _dl_predict(lstm_model, splits_dl["X_test"], y_mean, y_std)
@@ -276,6 +343,7 @@ print("SECTION 5 — Results Table")
 print("=" * 60)
 
 results_df = pd.DataFrame(results_list)
+epochs_df  = pd.DataFrame(epochs_list)
 
 sep = "=" * 72
 
@@ -306,6 +374,21 @@ for model_name in MODEL_NAMES:
     a_std  = m["zone_A_pct"].std()
     b_mean = m["zone_B_pct"].mean()
     print(f"  {model_name:12s}  Zone A={a_mean:.1f}% +/- {a_std:.1f}%   Zone B={b_mean:.1f}%")
+
+print()
+print(sep)
+print("TRAINING EPOCHS (early stopping)  mean +/- std, all patients")
+print(sep)
+
+for label, col in [
+    ("LSTM",        "lstm_epochs"),
+    ("Autoencoder", "ae_epochs"),
+    ("TCN",         "tcn_epochs"),
+    ("Transformer", "tr_epochs"),
+]:
+    e_mean = epochs_df[col].mean()
+    e_std  = epochs_df[col].std()
+    print(f"  {label:14s}  epochs: {e_mean:.1f} +/- {e_std:.1f}")
 
 print()
 

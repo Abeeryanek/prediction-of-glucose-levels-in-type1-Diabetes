@@ -1,8 +1,9 @@
 """
 Feature ablation study — OhioT1DM 2018 cohort, 30-min horizon.
+"Clean" cohort: excludes patients 563 and 575 (professor's request).
 
 Tests 8 feature combinations with RF and LSTM.  Results saved to
-results/ohio/results_feature_ablation.csv plus two charts.
+results/ohio/results_feature_ablation_clean.csv plus two charts.
 """
 import sys
 import os
@@ -22,8 +23,8 @@ from src.preprocessing.ohio_loader import load_patient, COHORT_2018
 from src.training.pipeline import make_splits
 from src.models import random_forest as rf
 from src.models.lstm import GlucoseLSTM, train_model as lstm_train
-from src.evaluation.metrics import rmse, mae
-from src.evaluation.plots import plot_feature_importance
+from src.evaluation.metrics import rmse, mae, clarke_error_grid
+from src.evaluation.plots import plot_feature_importance, plot_clarke_error_grid
 
 # ── Config ────────────────────────────────────────────────────────────────────
 DATA_ROOT   = "data/ohio"
@@ -32,6 +33,10 @@ GS_PATH     = "results/ohio/grid_search_results.json"
 HORIZON     = 6
 STEP_30MIN  = 5      # index 5 = 30-min step in the multi-step output
 WINDOW_SIZE = 12     # must match create_windows default
+
+EXCLUDE_PATIENTS = {"563", "575"}   # professor's request
+COHORT = [pid for pid in COHORT_2018 if pid not in EXCLUDE_PATIENTS]
+N_PATIENTS = len(COHORT)
 
 FEAT_SETS = {
     "glucose_only":   ["glucose"],
@@ -46,18 +51,18 @@ FEAT_SETS = {
 
 # ── Load data ─────────────────────────────────────────────────────────────────
 print("=" * 60)
-print("Loading OhioT1DM 2018 cohort ...")
+print("Loading OhioT1DM 2018 cohort (clean, excludes 563/575) ...")
 print("=" * 60)
 
 train_data, test_data = {}, {}
-for pid in COHORT_2018:
+for pid in COHORT:
     train_data[pid] = load_patient(
         f"{DATA_ROOT}/2018/train/{pid}-ws-training.xml"
     )
     test_data[pid] = load_patient(
         f"{DATA_ROOT}/2018/test/{pid}-ws-testing.xml"
     )
-print("Patients:", COHORT_2018)
+print("Patients:", COHORT)
 
 # ── Best hyperparameters from grid search ─────────────────────────────────────
 with open(GS_PATH) as f:
@@ -76,13 +81,14 @@ print("=" * 60)
 
 results_list        = []
 rf_full_importances = []   # collect per-patient importances for 'full' set
+pooled_lstm         = {fs: {"true": [], "pred": []} for fs in FEAT_SETS}  # for Clarke EGA
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Device: {device}\n")
 
 for feat_name, feat_cols in FEAT_SETS.items():
     print(f"-- {feat_name}  {feat_cols}")
-    for pid in COHORT_2018:
+    for pid in COHORT:
         try:
             # ── Splits ────────────────────────────────────────────────────────
             splits_rf = make_splits(
@@ -127,6 +133,9 @@ for feat_name, feat_cols in FEAT_SETS.items():
             rf_rmse_val   = rmse(y_true_30, rf_pred_30)
             lstm_rmse_val = rmse(y_true_30, lstm_pred_30)
 
+            pooled_lstm[feat_name]["true"].append(y_true_30)
+            pooled_lstm[feat_name]["pred"].append(lstm_pred_30)
+
             results_list.append({
                 "feat_set":  feat_name,
                 "patient":   pid,
@@ -158,7 +167,7 @@ ordered    = list(FEAT_SETS.keys())
 
 sep = "=" * 68
 print(sep)
-print("FEATURE ABLATION — 30-min RMSE (mean ± std, 6 patients, COHORT_2018)")
+print(f"FEATURE ABLATION — 30-min RMSE (mean ± std, {N_PATIENTS} patients, clean cohort)")
 print(sep)
 print(f"  {'Feature Set':22s}  {'RF RMSE':>18s}  {'LSTM RMSE':>18s}")
 print("  " + "-" * 62)
@@ -170,7 +179,7 @@ for fs in ordered:
 print()
 
 # ── Save CSV ──────────────────────────────────────────────────────────────────
-csv_path = f"{RESULTS_DIR}/results_feature_ablation.csv"
+csv_path = f"{RESULTS_DIR}/results_feature_ablation_clean.csv"
 results_df.to_csv(csv_path, index=False)
 print(f"Saved: {csv_path}")
 
@@ -193,7 +202,7 @@ ax.set_xlabel("Feature Set", fontsize=12)
 ax.set_ylabel("RMSE [mg/dL]", fontsize=12)
 ax.set_title(
     "Feature Ablation Study — 30-min RMSE\n"
-    "OhioT1DM 2018 cohort (6 patients, mean ± std)",
+    f"OhioT1DM 2018 cohort ({N_PATIENTS} patients, excludes 563/575, mean ± std)",
     fontsize=13,
 )
 ax.set_xticks(x)
@@ -203,7 +212,7 @@ ax.grid(axis="y", alpha=0.3, linewidth=0.8)
 ax.set_ylim(0, max(rf_means + lstm_means) * 1.25)
 fig.tight_layout()
 
-barchart_path = f"{RESULTS_DIR}/feature_ablation_barchart.png"
+barchart_path = f"{RESULTS_DIR}/feature_ablation_barchart_clean.png"
 fig.savefig(barchart_path, dpi=150, bbox_inches="tight")
 plt.close(fig)
 print(f"Saved: {barchart_path}")
@@ -213,7 +222,7 @@ if rf_full_importances:
     full_cols = FEAT_SETS["full"]          # 5 features
     n_feat    = len(full_cols)
 
-    # Mean across 6 patients → shape (WINDOW_SIZE * n_feat,)
+    # Mean across patients → shape (WINDOW_SIZE * n_feat,)
     all_imp = np.mean(rf_full_importances, axis=0)
 
     # Flatten order is row-major: [f0_t0, f1_t0, ..., fN_t0, f0_t1, ...]
@@ -225,12 +234,52 @@ if rf_full_importances:
         importances=imp_per_feature,
         title=(
             "RF Feature Importance — 'full' feature set\n"
-            "30-min horizon, COHORT_2018 (mean across 6 patients × 6 estimators)"
+            f"30-min horizon, clean cohort (mean across {N_PATIENTS} patients × 6 estimators)"
         ),
     )
-    imp_path = f"{RESULTS_DIR}/feature_importance_rf.png"
+    imp_path = f"{RESULTS_DIR}/feature_importance_rf_clean.png"
     fig_imp.savefig(imp_path, dpi=150, bbox_inches="tight")
     plt.close(fig_imp)
     print(f"Saved: {imp_path}")
+
+# ── Clarke Error Grid — every feature combination (LSTM, pooled patients) ─────
+print()
+print(sep)
+print("CLARKE ZONE A/B % — 30-min RMSE, LSTM predictions pooled across patients")
+print(sep)
+
+ceg_rows = []
+fig_ceg, axes = plt.subplots(2, 4, figsize=(22, 11))
+axes_flat = axes.ravel()
+
+for ax, fs in zip(axes_flat, ordered):
+    y_true_pooled = np.concatenate(pooled_lstm[fs]["true"])
+    y_pred_pooled = np.concatenate(pooled_lstm[fs]["pred"])
+    ceg = clarke_error_grid(y_true_pooled, y_pred_pooled)
+
+    ceg_rows.append({"feat_set": fs, "n": len(y_true_pooled), **ceg["percentages"]})
+    print(f"  {fs:22s}  A={ceg['percentages']['A']:.1f}%  B={ceg['percentages']['B']:.1f}%"
+          f"  C={ceg['percentages']['C']:.1f}%  D={ceg['percentages']['D']:.1f}%"
+          f"  E={ceg['percentages']['E']:.1f}%")
+
+    plot_clarke_error_grid(
+        y_true_pooled, y_pred_pooled,
+        title=f"{fs}  (Zone A={ceg['percentages']['A']:.1f}%, n={len(y_true_pooled)})",
+        ax=ax,
+    )
+
+fig_ceg.suptitle(
+    f"Clarke Error Grid — LSTM, 30-min horizon, clean cohort ({N_PATIENTS} patients, all feature sets)",
+    fontsize=14, y=1.02,
+)
+fig_ceg.tight_layout()
+ceg_grid_path = f"{RESULTS_DIR}/clarke_ablation_clean_all_featuresets.png"
+fig_ceg.savefig(ceg_grid_path, dpi=150, bbox_inches="tight")
+plt.close(fig_ceg)
+print(f"\nSaved: {ceg_grid_path}")
+
+ceg_csv_path = f"{RESULTS_DIR}/clarke_ablation_clean.csv"
+pd.DataFrame(ceg_rows).to_csv(ceg_csv_path, index=False)
+print(f"Saved: {ceg_csv_path}")
 
 print("\nDone.")
