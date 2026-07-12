@@ -312,6 +312,10 @@ for pid in ALL_PATIENTS:
                     "horizon": horizon_name,
                     "rmse": rmse(y_true_step, y_pred_step),
                     "mae":  mae(y_true_step, y_pred_step),
+                    "lstm_epochs": lstm_epochs,
+                    "ae_epochs":   ae_epochs,
+                    "tcn_epochs":  tcn_epochs,
+                    "tr_epochs":   tr_epochs,
                 }
                 if step_idx == 5:
                     ceg = clarke_error_grid(y_true_step, y_pred_step)
