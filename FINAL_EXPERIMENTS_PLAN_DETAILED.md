@@ -415,6 +415,128 @@ is a separate, larger extension — no Glucdict LOPO script exists yet. Given
 the timeline (§11), this is deprioritised behind the OhioT1DM 5-model LOPO
 extension unless the supervisor flags it as required (see §12).
 
+## 9A. BIG IDEAs Pipeline — Current State and Alignment (Abeer)
+
+Abeer provided a detailed status update on the BIG IDEAs pipeline
+(`experiments/` codebase). This section documents the current state, the
+gaps against the shared OhioT1DM/Glucdict pipeline (§2–§3), and the work
+needed to reconcile them.
+
+### 9A.1 Model Set Difference
+
+| Pipeline | Models |
+|---|---|
+| BIG IDEAs (current) | RF, GB, LSTM, CNN-LSTM, Transformer |
+| Shared (OhioT1DM/Glucdict) | RF, LSTM, Autoencoder, TCN, Transformer |
+| Common to both | RF, LSTM, Transformer |
+
+Autoencoder and TCN have now been **coded** for BIG IDEAs but **not yet run
+end-to-end** — no result numbers exist for them yet. This directly changes
+the answer to open question 6 (§12): full 5-model unification is now
+feasible, pending that run.
+
+### 9A.2 Training Condition Differences (must be reconciled)
+
+| Setting | Shared pipeline (§2) | BIG IDEAs current | Action |
+|---|---|---|---|
+| Loss (RF, GB, LSTM, CNN-LSTM, Transformer) | MSE | Clinically weighted MSE (hypo/hyper weights) | Document as a deliberate departure, not an oversight |
+| Loss (Autoencoder, TCN) | MSE | Plain MSE | Decide: match the clinical weighting used by the other 5 models, or document the inconsistency |
+| max_epochs | 150 | 100 | Raise to 150 or justify keeping 100 |
+| Batch size | 32 | 64 | Lower to 32 to match §2 |
+| Shuffle | False | True (LSTM, CNN-LSTM, Transformer); False (Autoencoder, TCN) | Run the shuffle experiment below before deciding |
+| Train/val split | Last 20% | Last 15% | Align to 20%, per §2 |
+| Random seed | 42 | Not set | Add `torch.manual_seed(42)` (+ `np.random.seed(42)`), same fix as §2 item 3 |
+
+The clinically weighted MSE is itself a meaningful, possibly justified
+design choice for a glucose-forecasting model (hypo/hyperglycemia
+misprediction cost more clinically than misprediction in-range) — it should
+not be silently reverted to plain MSE without discussion. But applying it
+to only 3 of the 5 models on BIG IDEAs is an inconsistency: it advantages
+LSTM/CNN-LSTM/Transformer/RF/GB over Autoencoder/TCN in any RMSE
+comparison, and must be resolved (apply uniformly, or document why not)
+before Autoencoder/TCN results are compared against the other three.
+
+### 9A.3 Shuffle Experiment (BIG IDEAs specific)
+
+Because consecutive windows overlap by 11 of 12 timesteps, with
+`shuffle=False` consecutive minibatches are highly similar, which can bias
+gradients. Since BIG IDEAs currently shuffles 3 of its 5 models but not the
+other 2, this inconsistency needs to be tested rather than resolved by
+assumption.
+
+- **Plan**: train each model twice — `shuffle=True` vs. `shuffle=False` —
+  holding fold, horizon, features, and hyperparameters fixed. Compare RMSE
+  and epochs-to-convergence.
+- **Why it matters**: if shuffle changes RMSE meaningfully, the current
+  per-model inconsistency (§9A.2) is actively affecting which model looks
+  better in today's BIG IDEAs results, and this must be resolved before any
+  cross-model comparison on BIG IDEAs is treated as fair.
+
+### 9A.4 BIG IDEAs Ablation — More Granular Than OhioT1DM
+
+BIG IDEAs already isolates individual wearable signals (EDA, heart_rate,
+BVP, IBI separately) — more granular than the shared pipeline's
+wearable/full grouping in §8.1–8.3. This is an advantage worth keeping and
+extending, not replacing. Planned revisions:
+
+- Extend ablation from single-fold to all 5 walk-forward folds (report
+  mean ± std, matching the convention used elsewhere in this plan).
+- Add Clarke Zone A % per feature group (currently only RMSE is reported).
+- Log row count `n` per feature group, to catch silent dropped-row bugs —
+  the same class of issue flagged for OhioT1DM in §8.1's data-quality note.
+- Run the ablation for Autoencoder and TCN once they have their first
+  end-to-end run (§9A.1).
+- Isolate nutritional rolling-window granularities individually:
+  `carbs_30min` vs. `carbs_1h` vs. `carbs_4h`, rather than only as a
+  combined nutritional block — feeds into the planned nutritional-subset
+  experiment already noted in §8.4.
+
+### 9A.5 BIG IDEAs Grid Search
+
+| Model | Grid |
+|---|---|
+| RF / GB | `n_estimators` [100, 200, 300] × `max_depth` [10, 15, 20] × `min_samples_leaf` [1, 2, 4] |
+| LSTM / CNN-LSTM / Transformer | `hidden_dim` [32, 64, 128] × `lr` [1e-3, 5e-4] |
+| Autoencoder | `hidden_size` [32, 64, 128] × `lr` [1e-3, 5e-4]; latent size auto-set to `hidden_size // 2` |
+| TCN | `num_filters` [32, 64, 128] × `lr` [1e-3, 5e-4]; kernel size fixed at 3; dilations [1, 2, 4, 8] |
+
+Same limitation as the shared pipeline's grid search (§3): searched once on
+the largest fold, 30-min horizon, `full` feature set, then reused
+everywhere else. Needs the same fold/horizon invariance check flagged in
+§3.6 for OhioT1DM/Glucdict/BIG IDEAs.
+
+### 9A.6 BIG IDEAs Window Size Note
+
+The BIG IDEAs parquet files **already apply** an exponentially weighted
+moving average (halflife 2h / 8h / 24h) to food macro columns at
+*ingestion* time, before any model sees the data. This is a separate,
+already-applied preprocessing step and must not be confused with
+`SEQ_LENGTH` (the model's input lookback window, analogous to `window_size`
+in §5) — the planned window-size sweep varies `SEQ_LENGTH` ∈ [12, 24, 36,
+72] only, and does not touch the EWM halflives.
+
+At `SEQ_LENGTH=72`, patients with fewer than 73 rows in a given fold are
+silently excluded from that fold. A per-patient row-count check is needed
+before running the `SEQ_LENGTH=72` condition, to know in advance how many
+of the 16 LOPO patients (§9A.7) would actually be dropped rather than
+discovering it after the fact.
+
+### 9A.7 BIG IDEAs LOPO
+
+- **16 patients** (one fold each) — larger than OhioT1DM's 12-patient LOPO
+  (§9).
+- Must cover all 7 BIG IDEAs models (RF, GB, LSTM, CNN-LSTM, Transformer,
+  plus Autoencoder and TCN once run) from the start, rather than adding
+  models incrementally the way OhioT1DM LOPO did (§9).
+- Clinical weighting (§9A.2) must be **recomputed on the pooled training
+  data** for each fold, not reused from a single-patient or global
+  computation — hypo/hyper weighting depends on the training population's
+  glucose distribution, which changes per fold when one patient is held
+  out.
+- Each patient must be windowed separately **before** pooling, to respect
+  patient boundaries (matching the shared pipeline's LOPO fold construction
+  in §9 — windows must never span two different patients' timelines).
+
 ## 10. Why Our Results Are Worse Than Literature — Hypotheses to Test
 
 | Hypothesis | How we test it | Expected finding |
@@ -463,7 +585,16 @@ quietly resolved, since it changes the shape of the final narrative.
 5. How should we frame H1 in §10, given our own feature-ablation data
    contradicts the "fewer features explain the gap" hypothesis as
    originally stated?
-6. Is resolving the BIG IDEAs model-set mismatch (§4 — GB/CNN-LSTM vs. the
-   shared Autoencoder/TCN set) worth the implementation time, or is it
-   acceptable to scope the 3-dataset comparison to the 3 models common to
-   both pipelines (RF, LSTM, Transformer)?
+6. Is resolving the BIG IDEAs model-set mismatch (§4, §9A.1 — GB/CNN-LSTM
+   vs. the shared Autoencoder/TCN set) worth the implementation time, or is
+   it acceptable to scope the 3-dataset comparison to the 3 models common
+   to both pipelines (RF, LSTM, Transformer)? **Update**: Autoencoder and
+   TCN are now coded for BIG IDEAs (§9A.1), which makes full 5-model
+   unification (Option A — report all 5 shared models, RF/LSTM/Autoencoder/
+   TCN/Transformer, on BIG IDEAs) feasible for the first time. Our
+   recommendation is **Option A**, pending (a) the first end-to-end
+   Autoencoder/TCN run on BIG IDEAs and (b) resolution of the clinical-
+   weighting inconsistency (§9A.2 — currently applied to RF/GB/LSTM/
+   CNN-LSTM/Transformer but not Autoencoder/TCN), since an unresolved
+   weighting mismatch would make any Autoencoder/TCN-vs-rest comparison on
+   BIG IDEAs unfair by construction.
