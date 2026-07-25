@@ -41,13 +41,21 @@ glucose jumps, adding noise to the learning signal.
 Planned test: split sequences at gaps > 6 steps (30 min) so no window
 crosses a large gap; compare RMSE.
 
-## Discrepancy 4 — No Derived Features (MODERATE)
-Ours: raw glucose, bolus, carbs only.
-Literature: Kalita & Mirza and others add glucose rate-of-change (first
-difference) and time-of-day features.
-Likely effect: MODERATE — derived features encode trend and circadian
-patterns explicitly.
-Planned test: add glucose velocity (diff) and hour-of-day, compare RMSE.
+## Discrepancy 4 — No Derived Features (MODERATE, needs literature check)
+Ours: raw glucose, bolus, carbs only — no engineered features.
+Literature: derived features such as glucose rate-of-change (first
+difference) and time-of-day are commonly used in glucose forecasting
+preprocessing pipelines (e.g. patent US11426102 describes rate-of-change
+after carbohydrate consumption and time-of-day statistical measures as
+standard extracted features). We have NOT yet confirmed the exact derived
+features used by our specific comparison papers (Kalita & Mirza 2025,
+Xiong 2025) — this must be verified against those sources before any
+claim about their feature engineering is made.
+Likely effect: MODERATE — derived features explicitly encode trend and
+circadian patterns the model would otherwise infer implicitly.
+Planned test: add glucose velocity (first difference) and hour-of-day,
+compare RMSE — this is a self-contained experiment independent of what
+any specific paper did.
 
 ## Discrepancy 5 — Normalisation Scope (LOW)
 Ours: per-patient StandardScaler on training data.
@@ -73,9 +81,12 @@ adds derived features (4) and normalisation scope (5) as additional
 factors worth isolating.
 
 ## Caveat on Literature Citations
-The specific claims attributed to Hameed & Kleinberg (2020) and Kalita &
-Mirza (2025) above (median filter window=5, <30min gap threshold,
-rate-of-change/time-of-day features) have not been independently verified
-against the source papers in this session — they were supplied directly
-rather than confirmed via lookup. Verify these details against the actual
-papers before citing them in the thesis or presentation.
+The Hameed & Kleinberg (2020) claims used above (median filter window=5,
+<30min gap threshold — Discrepancies 1 and 2) have been verified against
+the source paper. The Kalita & Mirza (2025) derived-features attribution
+originally used for Discrepancy 4 could NOT be verified against that
+source and has been reworded above to avoid an unverified attribution —
+the general practice is now supported by a patent citation (US11426102)
+instead, and the specific comparison papers (Kalita & Mirza 2025,
+Xiong 2025) are flagged as still needing that check before any claim
+about their feature engineering is made in the thesis or presentation.
