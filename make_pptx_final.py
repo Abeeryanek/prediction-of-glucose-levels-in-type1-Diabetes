@@ -119,11 +119,13 @@ def new_slide(prs):
 
 
 def add_bullet_body(slide, items, top=1.35, font_size=18,
-                    left=0.5, width=12.3):
+                    left=0.5, width=12.3, height=None):
     from lxml import etree
     from pptx.oxml.ns import qn
+    if height is None:
+        height = min(5.5, 7.15 - top - 0.1)
     txb = slide.shapes.add_textbox(
-        Inches(left), Inches(top), Inches(width), Inches(5.5)
+        Inches(left), Inches(top), Inches(width), Inches(height)
     )
     tf = txb.text_frame
     tf.word_wrap = True
@@ -268,7 +270,7 @@ sl = new_slide(prs)
 add_rect(sl, 0, 0, 13.33, 7.5, fill_rgb=DARK_BLUE)
 add_rect(sl, 1.2, 2.0, 10.9, 3.4, fill_rgb=WHITE)
 add_textbox(sl, 1.4, 2.5, 10.5, 1.0,
-            "Blood Glucose Forecasting — Progress Update",
+            "Blood Glucose Forecasting - Progress Update",
             font_size=32, bold=True, color=DARK_BLUE, align=PP_ALIGN.CENTER)
 add_textbox(sl, 1.4, 3.8, 10.5, 0.5,
             "University of Duisburg-Essen  |  Khalil & Abeer  |  July 2026",
@@ -289,11 +291,12 @@ add_bullet_body(sl, [
     "Expanded Grid Search to all 5 models with literature justification",
     "Documented training epochs  (early stopping — varies per model/patient)",
     "Feature ablation:  2020 cohort (acceleration) + clean 2018 (no 563+575)",
-    "Leave-One-Patient-Out cross-validation",
+    "Leave-One-Patient-Out cross-validation  (5 models, pooled + per-patient-scaled)",
     "Cross-dataset transfer learning  (OhioT1DM → Glucdict)",
     "Preprocessing comparison table vs. literature",
+    "Unified Clarke Error Grid library across both pipelines  (15/30/45-min)",
     "Detailed final experiments plan",
-], top=1.4, font_size=18)
+], top=1.4, font_size=17)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -392,10 +395,10 @@ add_textbox(sl, 0.4, 4.6, 12.5, 0.4,
 add_note_block(sl, 0.4, 5.05, 12.5, 1.35,
     "All values are RMSE (Root Mean Squared Error) in mg/dL. RMSE was "
     "chosen because: (1) it is the standard metric in all comparison "
-    "papers (Kalita & Mirza 2025, Xiong 2025, Rodríguez-Rodríguez 2024), "
-    "enabling direct literature comparison; (2) it penalises large errors "
-    "more heavily than MAE — clinically appropriate since a 40 mg/dL error "
-    "is far more dangerous than four 10 mg/dL errors.",
+    "papers (Kalita & Mirza 2025, Bertachi et al. 2018, Rodríguez-Rodríguez "
+    "et al. 2024), enabling direct literature comparison; (2) it penalises "
+    "large errors more heavily than MAE — clinically appropriate since a "
+    "40 mg/dL error is far more dangerous than four 10 mg/dL errors.",
     font_size=12, color=AMBER_FG, bg=AMBER_BG, title="Why RMSE?")
 
 add_note_block(sl, 0.4, 6.5, 12.5, 0.6,
@@ -451,44 +454,59 @@ add_textbox(sl, 0.4, 6.58, 12.5, 0.5,
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SLIDE 7 — CLARKE ERROR GRID (30-MIN)
+# SLIDE 7 — CLARKE ERROR GRID (15/30/45-MIN)
 # ═════════════════════════════════════════════════════════════════════════════
 sl = new_slide(prs)
-add_header_bar(sl, "Clarke Error Grid", "30-min horizon")
+add_header_bar(sl, "Clarke Error Grid", "15 / 30 / 45-min horizons — Zone A %, all 5 models")
 add_footer(sl, 7)
 
 add_table(sl,
-          ["Model", "Zone A %", "Zone B %"],
+          ["Model", "15-min", "30-min", "45-min"],
           [
-              ("LSTM",        "87.4 ± 4.6%", "—"),
-              ("Autoencoder", "87.1 ± 4.9%", "—"),
-              ("RF",          "86.4 ± 5.1%", "—"),
-              ("Transformer", "84.7 ± 5.2%", "—"),
-              ("TCN",         "81.1 ± 7.9%", "← high variance — unreliable"),
+              ("LSTM",        "96.9%", "87.0%", "76.0%"),
+              ("Autoencoder", "96.3%", "86.7%", "76.2%"),
+              ("RF",          "96.5%", "86.4%", "75.3%"),
+              ("Transformer", "95.2%", "85.8%", "75.9%"),
+              ("TCN",         "93.5%", "81.6%", "69.9%"),
           ],
-          left=0.4, top=1.4, width=6.6,
-          col_widths=[2.0, 2.0, 2.6],
-          bold_row=[0], font_size=14)
+          left=0.4, top=1.5, width=7.0,
+          col_widths=[2.0, 1.6, 1.6, 1.8],
+          bold_row=[0, 1], font_size=14)
 
-add_rect(sl, 0.4, 4.45, 6.6, 1.7, fill_rgb=AMBER_BG)
-add_textbox(sl, 0.6, 4.5, 6.3, 1.6,
-            "Clinical target: > 95% Zone A.\n\n"
-            "Gap explained by 3-feature input only.\n"
-            "TCN high std deviation indicates inconsistency across\n"
-            "patients — clinically concerning.",
-            font_size=13, color=AMBER_FG)
+add_textbox(sl, 0.4, 4.1, 7.0, 0.3,
+            "TCN lowest and highest-variance at every horizon (see Slide 6 std).",
+            font_size=11, color=MID_BLUE)
 
+add_textbox(sl, 7.6, 1.42, 5.3, 0.5,
+            "Generated directly by the clarke-error-grid library "
+            "(v0.1.4, ceg.plot) — RF, 30-min horizon shown as a "
+            "representative model.",
+            font_size=11, color=MID_BLUE)
 sl.shapes.add_picture(
-    "results/ohio/clarke_30min_all_models.png",
-    Inches(7.2), Inches(1.35), Inches(5.8), Inches(5.6)
+    "results/ohio/clarke_30min_library.png",
+    Inches(7.95), Inches(1.95), Inches(4.7), Inches(4.7)
 )
 
+add_note_block(sl, 0.4, 4.55, 7.0, 1.0,
+    "Zone A % is now computed via the shared clarke-error-grid library "
+    "(v0.1.4), unifying zone classification with Abeer's pipeline — both "
+    "sides report identical Clarke zones from the same reference "
+    "implementation.",
+    font_size=12, color=DARK_BLUE, bg=RGBColor(0xDF, 0xE8, 0xF5))
+
+add_note_block(sl, 0.4, 5.65, 7.0, 1.35,
+    "Clinical target: > 95% Zone A — met only at the 15-min horizon.\n"
+    "Zone A falls from ~96% (15-min) to ~76% (45-min) for every model — "
+    "the classic accuracy/lookahead tradeoff. Gap to the clinical target "
+    "also reflects the reduced 3-feature input used throughout this work.",
+    font_size=12, color=AMBER_FG, bg=AMBER_BG)
+
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SLIDE 8 — FEATURE ABLATION: WEARABLE FEATURES CONSISTENTLY HURT
+# SLIDE 8 — FEATURE ABLATION: WEARABLE FEATURES DO NOT IMPROVE PREDICTION
 # ═════════════════════════════════════════════════════════════════════════════
 sl = new_slide(prs)
-add_header_bar(sl, "Feature Ablation: Wearable Features Consistently Hurt")
+add_header_bar(sl, "Feature Ablation: Wearable Features Do Not Improve Prediction")
 add_footer(sl, 8)
 
 col_w = 3.95
@@ -525,59 +543,93 @@ add_textbox(sl, col_lefts[2], 1.35, col_w, 0.65,
             font_size=14, bold=True, color=DARK_BLUE)
 add_multiline_textbox(sl, col_lefts[2], 2.05, col_w, 2.6,
     [
+        "glucose_activity:",
+        "  RF 15.19 / LSTM 13.86  ← best",
         "glucose_only:",
-        "  RF 15.23 / LSTM 14.03  ← best",
+        "  RF 15.23 / LSTM 14.03  ← ~tied",
         "full_wearable:",
         "  RF 17.45 / LSTM 16.89  ← worse",
     ], font_size=13, color=BLACK)
 
-add_rect(sl, 0.35, 5.35, 12.6, 1.5, fill_rgb=DARK_BLUE)
-add_textbox(sl, 0.6, 5.45, 12.1, 1.3,
-            "Across all 3 datasets and both cohorts: adding wearable signals "
-            "consistently degrades 30-minute prediction.\n"
-            "The clinical minimum (glucose + insulin + carbs) is sufficient.",
-            font_size=16, bold=True, color=WHITE)
+add_rect(sl, 0.35, 5.25, 12.6, 1.7, fill_rgb=DARK_BLUE)
+add_textbox(sl, 0.6, 5.35, 12.1, 1.5,
+            "On OhioT1DM (both cohorts), wearable features degrade "
+            "30-minute prediction; on Glucdict, light activity is roughly "
+            "tied with glucose-only.\n"
+            "The accurate claim: wearable features do not improve "
+            "30-minute prediction on any dataset — minimal features "
+            "(glucose + clinical) are sufficient.",
+            font_size=15, bold=True, color=WHITE)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SLIDE 9 — LOPO: PERSONALISATION BARELY MATTERS
+# SLIDE 9 — BEST FEATURE COMBINATION PER MODEL
+# ═════════════════════════════════════════════════════════════════════════════
+sl = new_slide(prs)
+add_header_bar(sl, "Best Feature Combination per Model")
+add_footer(sl, 9)
+
+add_table(sl,
+          ["Dataset", "Best feature set", "RF", "LSTM"],
+          [
+              ("OhioT1DM 2018", "clinical",         "21.33", "20.22"),
+              ("OhioT1DM 2020", "clinical",         "25.00", "22.04"),
+              ("Glucdict",      "glucose_activity", "15.19", "13.86"),
+          ],
+          left=0.6, top=1.7, width=10.5,
+          col_widths=[3.2, 3.3, 2.0, 2.0], font_size=17)
+
+add_rect(sl, 0.6, 4.3, 10.5, 1.6, fill_rgb=DARK_BLUE)
+add_textbox(sl, 0.85, 4.45, 10.0, 1.3,
+            "Every model on every dataset achieves its best result with "
+            "minimal features (glucose + clinical, or glucose + light "
+            "activity).\n"
+            "No model benefits from the full wearable feature set.",
+            font_size=17, bold=True, color=WHITE)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SLIDE 10 — LOPO: PERSONALISATION BARELY MATTERS
 # ═════════════════════════════════════════════════════════════════════════════
 sl = new_slide(prs)
 add_header_bar(sl, "LOPO: Personalisation Barely Matters")
-add_footer(sl, 9)
+add_footer(sl, 10)
 
-add_textbox(sl, 0.4, 1.35, 6.0, 0.4,
-            "LOPO vs. Personalised  (30-min, OhioT1DM)",
-            font_size=15, bold=True, color=DARK_BLUE)
+add_textbox(sl, 0.4, 1.35, 10.0, 0.4,
+            "LOPO: Personalised vs Population  (30-min RMSE, mg/dL)",
+            font_size=16, bold=True, color=DARK_BLUE)
+
 add_table(sl,
-          ["Model", "Personalised", "LOPO", "Gap"],
+          ["Model", "Personalised", "LOPO pooled", "LOPO per-patient-scaled"],
           [
-              ("RF",   "23.35", "22.81", "-0.54 (improves!)"),
-              ("LSTM", "21.25", "22.37", "+1.17"),
+              ("LSTM",        "21.49", "22.45", "22.21"),
+              ("Autoencoder", "21.59", "22.46", "22.22"),
+              ("Transformer", "22.38", "22.83", "22.74"),
+              ("RF",          "23.34", "22.81", "22.75"),
+              ("TCN",         "24.13", "29.09", "24.65"),
           ],
-          left=0.4, top=1.8, width=6.6,
-          col_widths=[1.4, 1.9, 1.6, 1.7], font_size=14)
+          left=0.4, top=1.8, width=12.5,
+          col_widths=[2.3, 2.9, 2.9, 4.4],
+          bold_row=[4], font_size=15)
 
-add_rect(sl, 7.3, 1.35, 5.6, 4.5, fill_rgb=GREEN_BG)
-add_textbox(sl, 7.5, 1.45, 5.2, 0.4,
-            "What this means", font_size=15, bold=True, color=GREEN_HL)
-add_textbox(sl, 7.5, 1.9, 5.2, 3.8,
-            "A population model trained on 11 patients generalises "
-            "almost as well as a personalised model for a new unseen "
-            "patient.\n\n"
-            "RF actually improves with pooling — more data outweighs "
-            "loss of patient-specificity.\n\n"
-            "Clinical implication: one deployed model could serve new "
-            "patients without requiring 8 weeks of personalised data.",
-            font_size=14, color=GREEN_HL)
+add_bullet_body(sl, [
+    "Personalisation gap is small (0.3-1.2 mg/dL) across all 5 models, "
+    "not just RF/LSTM — the effect generalises across architectures.",
+    "Per-patient scaling consistently beats pooled — removing "
+    "inter-patient baseline differences helps the population model.",
+    "TCN is the exception: pooled gap is large (+5 mg/dL) but collapses "
+    "to +0.5 mg/dL with per-patient scaling. TCN's poor generalisation "
+    "was driven by inter-patient baseline glucose differences, not "
+    "architecture.",
+], top=4.55, font_size=15, left=0.5, width=12.3)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SLIDE 10 — TRANSFER LEARNING
+# SLIDE 11 — TRANSFER LEARNING
 # ═════════════════════════════════════════════════════════════════════════════
 sl = new_slide(prs)
 add_header_bar(sl, "Transfer Learning: Domain Shift Costs ~1-2 mg/dL")
-add_footer(sl, 10)
+add_footer(sl, 11)
 
 add_table(sl,
           ["Model", "Transfer RMSE", "Personalised", "Gap"],
@@ -588,26 +640,34 @@ add_table(sl,
           left=0.4, top=1.5, width=8.0,
           col_widths=[1.6, 2.3, 2.1, 2.0], font_size=15)
 
-add_rect(sl, 0.4, 3.35, 12.5, 1.5, fill_rgb=RGBColor(0xDF, 0xE8, 0xF5))
-add_textbox(sl, 0.6, 3.45, 12.1, 1.3,
+add_note_block(sl, 0.4, 2.85, 12.5, 1.05,
+    "'Personalised' = a model trained and tested on the same individual "
+    "patient's own data  (the standard per-patient setup). Transfer = an "
+    "OhioT1DM-trained model applied zero-shot to Glucdict users it never "
+    "saw during training.",
+    font_size=12, color=DARK_BLUE, bg=RGBColor(0xE3, 0xEA, 0xF7),
+    title="Definitions:")
+
+add_rect(sl, 0.4, 4.05, 12.5, 1.3, fill_rgb=RGBColor(0xDF, 0xE8, 0xF5))
+add_textbox(sl, 0.6, 4.15, 12.1, 1.1,
             "Trained on OhioT1DM  (T1DM, Medtronic Enlite CGM)\n"
             "Tested zero-shot on Glucdict  (prediabetic, Dexcom G6 CGM)\n"
             "Different population + different device = only +1-2 mg/dL penalty",
             font_size=14, color=DARK_BLUE)
 
-add_rect(sl, 0.4, 5.05, 12.5, 1.1, fill_rgb=DARK_BLUE)
-add_textbox(sl, 0.6, 5.15, 12.1, 0.9,
+add_rect(sl, 0.4, 5.5, 12.5, 1.1, fill_rgb=DARK_BLUE)
+add_textbox(sl, 0.6, 5.6, 12.1, 0.9,
             "Glucose autocorrelation is the dominant predictive signal "
             "regardless of patient population or device.",
             font_size=17, bold=True, color=WHITE, align=PP_ALIGN.CENTER)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SLIDE 11 — GLUCDICT: ALL 5 MODELS
+# SLIDE 12 — GLUCDICT: ALL 5 MODELS
 # ═════════════════════════════════════════════════════════════════════════════
 sl = new_slide(prs)
 add_header_bar(sl, "Glucdict: All 5 Models", "glucose_only, 30-min horizon, 13 users")
-add_footer(sl, 11)
+add_footer(sl, 12)
 
 add_table(sl,
           ["Model", "RMSE", "MAE"],
@@ -631,11 +691,11 @@ add_textbox(sl, 7.9, 1.7, 4.8, 2.8,
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SLIDE 12 — LITERATURE COMPARISON
+# SLIDE 13 — LITERATURE COMPARISON
 # ═════════════════════════════════════════════════════════════════════════════
 sl = new_slide(prs)
 add_header_bar(sl, "Literature Comparison", "30-min horizon")
-add_footer(sl, 12)
+add_footer(sl, 13)
 
 add_table(sl,
           ["Model", "RMSE [mg/dL]", "Dataset", "Features"],
@@ -660,8 +720,8 @@ add_note_block(sl, 0.4, 5.28, 12.5, 1.3,
     "No single wearable feature is universal. (2) Using 3 features as the "
     "controlled baseline enables the ablation study (Slide 8) to isolate "
     "the contribution of each additional signal. (3) The ablation confirmed "
-    "wearable features consistently degrade performance — the gap to "
-    "literature is therefore architectural, not feature-driven.",
+    "wearable features do not improve prediction — the gap to literature is "
+    "therefore architectural, not feature-driven.",
     font_size=12, color=DARK_BLUE, bg=RGBColor(0xDF, 0xE8, 0xF5))
 
 add_textbox(sl, 0.4, 6.65, 12.5, 0.45,
@@ -671,11 +731,11 @@ add_textbox(sl, 0.4, 6.65, 12.5, 0.45,
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SLIDE 13 — PREPROCESSING COMPARISON VS LITERATURE
+# SLIDE 14 — PREPROCESSING COMPARISON VS LITERATURE
 # ═════════════════════════════════════════════════════════════════════════════
 sl = new_slide(prs)
 add_header_bar(sl, "Preprocessing Comparison vs. Literature")
-add_footer(sl, 13)
+add_footer(sl, 14)
 
 add_table(sl,
           ["Step", "This Project", "Literature", "Match"],
@@ -700,16 +760,18 @@ add_textbox(sl, 0.6, 5.5, 12.1, 1.0,
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SLIDE 14 — THE THREE SCIENTIFIC FINDINGS
+# SLIDE 15 — THE THREE SCIENTIFIC FINDINGS
 # ═════════════════════════════════════════════════════════════════════════════
 sl = new_slide(prs)
 add_header_bar(sl, "The Three Scientific Findings")
-add_footer(sl, 14)
+add_footer(sl, 15)
 
 findings = [
-    ("1", "WEARABLE FEATURES CONSISTENTLY HURT AT 30 MINUTES",
-          "Observed across all 3 datasets and both cohorts.\n"
-          "Clinical minimum (glucose + insulin + carbs) is sufficient."),
+    ("1", "WEARABLE FEATURES DO NOT IMPROVE 30-MIN PREDICTION",
+          "Degrade prediction on OhioT1DM (both cohorts); roughly tied with "
+          "glucose-only on Glucdict.\n"
+          "Minimal features (glucose + clinical) are sufficient — no "
+          "dataset benefits from the full wearable set."),
     ("2", "PERSONALISATION IS NOT REQUIRED",
           "LOPO gap: only +1.17 mg/dL.\n"
           "Population model nearly as good as personalised model."),
@@ -731,11 +793,11 @@ for num, title, detail in findings:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# SLIDE 15 — FINAL EXPERIMENTS PLAN
+# SLIDE 16 — FINAL EXPERIMENTS PLAN
 # ═════════════════════════════════════════════════════════════════════════════
 sl = new_slide(prs)
 add_header_bar(sl, "Final Experiments Plan")
-add_footer(sl, 15)
+add_footer(sl, 16)
 
 add_table(sl,
           ["Experiment", "Priority", "Status"],
@@ -743,7 +805,7 @@ add_table(sl,
               ("Longer window sizes",      "High",     "Planned week 1"),
               ("45/60-min horizons",       "High",     "Planned week 1"),
               ("BIG IDEAs all 5 models",   "High",     "Planned week 1 (Abeer)"),
-              ("Unified Clarke EGA",       "High",     "Planned week 1"),
+              ("Unified Clarke EGA (15/30/45-min)", "High", "Done"),
               ("Final report writing",     "Critical", "Planned week 2-3"),
           ],
           left=0.6, top=1.6, width=12.1,
