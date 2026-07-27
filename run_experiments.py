@@ -41,12 +41,13 @@ RESULTS_DIR = Path("results/ohio")
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 WINDOW_SIZE = 12
-HORIZON     = 6
+HORIZON     = 9      # 9 steps x 5 min = 45 min max
 
 HORIZONS = {
     0: "5min",
     2: "15min",
     5: "30min",
+    8: "45min",
 }
 
 CLINICAL_FEATURES = ["glucose", "bolus", "carbs"]
@@ -317,7 +318,7 @@ for pid in ALL_PATIENTS:
                     "tcn_epochs":  tcn_epochs,
                     "tr_epochs":   tr_epochs,
                 }
-                if step_idx == 5:
+                if step_idx in (2, 5, 8):   # 15min, 30min, 45min
                     ceg = clarke_error_grid(y_true_step, y_pred_step)
                     for zone in "ABCDE":
                         row["zone_" + zone + "_pct"] = ceg["percentages"][zone]
@@ -355,7 +356,7 @@ print(sep)
 print("MEAN +/- STD  RMSE [mg/dL] and MAE [mg/dL]  (all patients)")
 print(sep)
 
-for horizon in ["5min", "15min", "30min"]:
+for horizon in ["5min", "15min", "30min", "45min"]:
     print(f"  Horizon: {horizon}")
     sub = results_df[results_df["horizon"] == horizon]
     for model_name in MODEL_NAMES:
@@ -368,16 +369,19 @@ for horizon in ["5min", "15min", "30min"]:
     print()
 
 print(sep)
-print("CLARKE ZONE A %  at 30-min horizon  (mean +/- std, all patients)")
+print("CLARKE ZONE A %  at 15/30/45-min horizons  (mean +/- std, all patients)")
 print(sep)
 
-sub30 = results_df[results_df["horizon"] == "30min"]
-for model_name in MODEL_NAMES:
-    m = sub30[sub30["model"] == model_name]
-    a_mean = m["zone_A_pct"].mean()
-    a_std  = m["zone_A_pct"].std()
-    b_mean = m["zone_B_pct"].mean()
-    print(f"  {model_name:12s}  Zone A={a_mean:.1f}% +/- {a_std:.1f}%   Zone B={b_mean:.1f}%")
+for horizon in ["15min", "30min", "45min"]:
+    print(f"  Horizon: {horizon}")
+    sub_h = results_df[results_df["horizon"] == horizon]
+    for model_name in MODEL_NAMES:
+        m = sub_h[sub_h["model"] == model_name]
+        a_mean = m["zone_A_pct"].mean()
+        a_std  = m["zone_A_pct"].std()
+        b_mean = m["zone_B_pct"].mean()
+        print(f"    {model_name:14s}  Zone A={a_mean:.1f}% +/- {a_std:.1f}%   Zone B={b_mean:.1f}%")
+    print()
 
 print()
 print(sep)

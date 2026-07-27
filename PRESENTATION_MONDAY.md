@@ -190,7 +190,7 @@ ranking with clinical-accuracy evidence, not just RMSE.
 |-------|-------------|-------------|
 | MHA-NBEATS (Kalita & Mirza 2025) | 16.57 | — |
 | Bertachi et al. (2018) | 19.33 | — |
-| Rodríguez-Rodríguez | 18.60 | — |
+| Rodríguez-Rodríguez (custom 40-patient DM1 dataset) | 18.60 | — |
 | **Our LSTM** | **21.21** | +1.9 vs. Bertachi |
 | Our Autoencoder | 21.41 | +2.1 vs. Bertachi |
 | Our Transformer | 22.91 | +3.6 vs. Bertachi |

@@ -602,19 +602,14 @@ memory. Verification status is noted per entry.
   using deep multihead attention layers inside neural basis expansion
   networks. *IEEE Journal of Biomedical and Health Informatics, 29*(5),
   3654–3663. https://doi.org/10.1109/JBHI.2025.3530461
-  **[NEEDS VERIFICATION: journal, volume, pages, and DOI are consistently
-  confirmed across two independent searches. However, the co-author's
-  name appears inconsistently across sources — "M. K. Baig," "Khalid B.
-  Mirza," and "Khalid Baig Mirza" all appear for what seems to be the
-  same person (NIT Rourkela faculty page uses "Khalid Baig Mirza"). Please
-  confirm the exact author-name formatting to use (e.g., "Mirza, K. B."
-  vs. "Baig, M. K.") against the paper's title page or IEEE Xplore author
-  list directly, since IEEE Xplore itself could not be scraped for this
-  verification. Separately, the 16.57 mg/dL RMSE figure attributed to this
-  paper in the literature-comparison slides has not itself been verified
-  against the source paper (only the bibliographic record was confirmed,
-  not the reported result) — Khalil should confirm the exact figure,
-  horizon, and evaluation setup before presenting it.]**
+  **[Verified — extracted directly from the PDF (byline: "Deepjyoti
+  Kalita, Member, IEEE, and Khalid B Mirza"; Dept. of Biotechnology and
+  Medical Engineering, National Institute of Technology, Rourkela). Only
+  two authors — resolves the earlier author-name ambiguity ("M. K. Baig"
+  vs. "Khalid B. Mirza"): it is Kalita, D. & Mirza, K. B. RMSE confirmed
+  from the abstract: 16.57 ± 2.56 mg/dL (MARD 6.81 ± 1.39%), OhioT1DM,
+  30-min prediction horizon; also reports 29.25 ± 6.02 mg/dL at 60-min
+  PH.]**
 
 - Kingma, D. P., & Ba, J. (2015). Adam: A method for stochastic
   optimization. *3rd International Conference on Learning Representations
@@ -640,13 +635,18 @@ memory. Verification status is noted per entry.
   Knowledge Discovery, 9*(3), e1301. https://doi.org/10.1002/widm.1301
   **[Verified — provided pre-verified]**
 
-- Rodríguez-Rodríguez, I. (2024). [Title/venue not yet located].
-  **[NEEDS VERIFICATION: cited in presentation slides only as
-  "Rodríguez-Rodríguez 2024" with an 18.60 mg/dL RMSE figure on a
-  "Custom" dataset — neither the full title/venue nor the reported value
-  could be confirmed via web search this session. Khalil must locate the
-  actual paper and confirm both the bibliographic details and the 18.60
-  mg/dL figure before it is presented as a literature benchmark.]**
+- Rodríguez-Rodríguez, I., Campo-Valera, M., Rodríguez, J.-V., & Woo, W. L.
+  (2024). IoMT innovations in diabetes management: Predictive models
+  using wearable data. *Expert Systems with Applications, 238*, Article
+  121994. https://doi.org/10.1016/j.eswa.2023.121994 **[Verified —
+  extracted directly from the PDF (Elsevier, Expert Systems with
+  Applications). RMSE confirmed from the abstract: Random Forest model,
+  18.60 mg/dL at a 30-min horizon (six-hour input window), and 26.21
+  mg/dL at 45-min horizon, on the authors' own passively-monitored
+  cohort of 40 DM1 patients (also corroborated on 10 Type 2 DM patients
+  as a proof of concept) — NOT OhioT1DM. The literature-comparison
+  slides must label this dataset as the custom 40-patient DM1 cohort,
+  not OhioT1DM or a generic "Custom."]**
 
 - Srivastava, N., Mansimov, E., & Salakhutdinov, R. (2015). Unsupervised
   learning of video representations using LSTMs. *Proceedings of the 32nd

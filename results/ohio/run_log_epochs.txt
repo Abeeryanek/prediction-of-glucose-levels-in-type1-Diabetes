@@ -1,0 +1,118 @@
+============================================================
+SECTION 1 — Imports and Configuration
+============================================================
+Patients : ['559', '563', '570', '575', '588', '591', '540', '544', '552', '567', '584', '596']
+Features : ['glucose', 'bolus', 'carbs']
+Results  : results\ohio
+
+============================================================
+SECTION 2 — Load OhioT1DM Data
+============================================================
+Patient Cohort  Train rows  Test rows                   Sensor columns
+    559   2018       12081       2876 gsr, skin_temp, heartrate, steps
+    563   2018       13098       2691 gsr, skin_temp, heartrate, steps
+    570   2018       11611       2880 gsr, skin_temp, heartrate, steps
+    575   2018       13104       2718 gsr, skin_temp, heartrate, steps
+    588   2018       13106       2880 gsr, skin_temp, heartrate, steps
+    591   2018       12755       2847 gsr, skin_temp, heartrate, steps
+    540   2020       13109       3066     gsr, skin_temp, acceleration
+    544   2020       12672       3136     gsr, skin_temp, acceleration
+    552   2020       11097       3950     gsr, skin_temp, acceleration
+    567   2020       13536       2871     gsr, skin_temp, acceleration
+    584   2020       13248       2995     gsr, skin_temp, acceleration
+    596   2020       13629       3003     gsr, skin_temp, acceleration
+
+============================================================
+SECTION 3 — Grid Search
+============================================================
+Loaded existing grid search results from results\ohio\grid_search_results.json
+
+Best parameters:
+  RF         : {'n_estimators': 200, 'max_depth': 10, 'min_samples_leaf': 4}
+  LSTM       : {'hidden_size': 128, 'lr': 0.0005}
+  Autoencoder: {'latent_size': 16, 'lr': 0.0005}
+  TCN        : {'num_filters': 32, 'lr': 0.0005}
+  Transformer: {'d_model': 128, 'lr': 0.0005, 'nhead': 4}
+
+============================================================
+SECTION 4 — Main Experiment Loop
+============================================================
+Using device: cuda
+
+[559] (2018) ... epochs [LSTM=76 AE=61 TCN=77 Transformer=52] ... done
+[563] (2018) ... epochs [LSTM=72 AE=81 TCN=54 Transformer=22] ... done
+[570] (2018) ... epochs [LSTM=51 AE=100 TCN=48 Transformer=60] ... done
+[575] (2018) ... epochs [LSTM=32 AE=100 TCN=42 Transformer=16] ... done
+[588] (2018) ... epochs [LSTM=68 AE=100 TCN=29 Transformer=36] ... done
+[591] (2018) ... epochs [LSTM=50 AE=36 TCN=27 Transformer=52] ... done
+[540] (2020) ... epochs [LSTM=75 AE=91 TCN=76 Transformer=17] ... done
+[544] (2020) ... epochs [LSTM=44 AE=40 TCN=79 Transformer=46] ... done
+[552] (2020) ... epochs [LSTM=62 AE=63 TCN=37 Transformer=30] ... done
+[567] (2020) ... epochs [LSTM=41 AE=42 TCN=48 Transformer=61] ... done
+[584] (2020) ... epochs [LSTM=33 AE=67 TCN=31 Transformer=97] ... done
+[596] (2020) ... epochs [LSTM=50 AE=88 TCN=71 Transformer=16] ... done
+
+Experiment loop complete.
+
+============================================================
+SECTION 5 — Results Table
+============================================================
+========================================================================
+MEAN +/- STD  RMSE [mg/dL] and MAE [mg/dL]  (all patients)
+========================================================================
+  Horizon: 5min
+    RF              RMSE: 5.87 ± 1.97   MAE: 3.09 ± 0.45
+    LSTM            RMSE: 6.11 ± 1.80   MAE: 3.54 ± 1.04
+    Autoencoder     RMSE: 6.39 ± 1.55   MAE: 3.75 ± 0.57
+    TCN             RMSE: 8.28 ± 3.35   MAE: 4.66 ± 0.83
+    Transformer     RMSE: 8.15 ± 3.22   MAE: 5.47 ± 2.74
+
+  Horizon: 15min
+    RF              RMSE: 14.06 ± 4.14   MAE: 8.66 ± 1.26
+    LSTM            RMSE: 12.70 ± 2.58   MAE: 8.10 ± 1.17
+    Autoencoder     RMSE: 13.06 ± 2.51   MAE: 8.38 ± 1.20
+    TCN             RMSE: 15.20 ± 2.98   MAE: 9.96 ± 1.42
+    Transformer     RMSE: 13.91 ± 3.15   MAE: 9.35 ± 1.98
+
+  Horizon: 30min
+    RF              RMSE: 23.35 ± 6.00   MAE: 15.80 ± 2.54
+    LSTM            RMSE: 21.22 ± 3.57   MAE: 14.77 ± 2.09
+    Autoencoder     RMSE: 21.59 ± 3.63   MAE: 15.08 ± 2.20
+    TCN             RMSE: 24.70 ± 4.80   MAE: 17.64 ± 2.68
+    Transformer     RMSE: 22.58 ± 4.12   MAE: 15.80 ± 2.55
+
+========================================================================
+CLARKE ZONE A %  at 30-min horizon  (mean +/- std, all patients)
+========================================================================
+  RF            Zone A=86.4% +/- 5.1%   Zone B=11.4%
+  LSTM          Zone A=87.1% +/- 5.0%   Zone B=10.8%
+  Autoencoder   Zone A=86.8% +/- 5.8%   Zone B=11.1%
+  TCN           Zone A=81.9% +/- 7.8%   Zone B=15.0%
+  Transformer   Zone A=85.4% +/- 5.7%   Zone B=12.9%
+
+========================================================================
+TRAINING EPOCHS (early stopping)  mean +/- std, all patients
+========================================================================
+  LSTM            epochs: 54.5 +/- 15.8
+  Autoencoder     epochs: 72.4 +/- 24.3
+  TCN             epochs: 51.6 +/- 19.6
+  Transformer     epochs: 42.1 +/- 24.3
+
+============================================================
+SECTION 6 — Clarke Error Grid Plots
+============================================================
+Saved: results\ohio\clarke_30min_all_models.png
+
+============================================================
+SECTION 7 — Prediction Plot (Patient 559)
+============================================================
+Saved: results\ohio\predictions_559_30min.png
+
+============================================================
+SECTION 8 — Save Results
+============================================================
+Done. Results saved to results/ohio/
+  results_all_models.csv        180 rows x 11 columns
+  clarke_30min_all_models.png   Clarke EGA for all 4 models
+  predictions_559_30min.png     24-h forecast comparison, patient 559
+  grid_search_results.json      best hyperparameters

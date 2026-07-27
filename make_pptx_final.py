@@ -641,7 +641,7 @@ add_table(sl,
           ["Model", "RMSE [mg/dL]", "Dataset", "Features"],
           [
               ("MHA-NBEATS  (Kalita & Mirza 2025)", "16.57", "OhioT1DM", "6"),
-              ("Rodríguez-Rodríguez 2024",          "18.60", "Custom",   "7"),
+              ("Rodríguez-Rodríguez 2024",          "18.60", "Custom (40-pt DM1)", "7"),
               ("Bertachi et al. 2018",              "19.33", "OhioT1DM", "4"),
               ("LSTM  (this work)",                 "21.25", "OhioT1DM", "3"),
               ("Autoencoder  (this work)",           "21.45", "OhioT1DM", "3"),
