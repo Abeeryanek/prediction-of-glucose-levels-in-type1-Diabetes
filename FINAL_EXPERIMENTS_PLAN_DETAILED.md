@@ -602,14 +602,9 @@ memory. Verification status is noted per entry.
   using deep multihead attention layers inside neural basis expansion
   networks. *IEEE Journal of Biomedical and Health Informatics, 29*(5),
   3654–3663. https://doi.org/10.1109/JBHI.2025.3530461
-  **[Verified — extracted directly from the PDF (byline: "Deepjyoti
-  Kalita, Member, IEEE, and Khalid B Mirza"; Dept. of Biotechnology and
-  Medical Engineering, National Institute of Technology, Rourkela). Only
-  two authors — resolves the earlier author-name ambiguity ("M. K. Baig"
-  vs. "Khalid B. Mirza"): it is Kalita, D. & Mirza, K. B. RMSE confirmed
-  from the abstract: 16.57 ± 2.56 mg/dL (MARD 6.81 ± 1.39%), OhioT1DM,
-  30-min prediction horizon; also reports 29.25 ± 6.02 mg/dL at 60-min
-  PH.]**
+  **[Verified — extracted directly from the source PDF. Reported result:
+  16.57 ± 2.56 mg/dL RMSE (MARD 6.81 ± 1.39%) on OhioT1DM at a 30-min
+  prediction horizon; also reports 29.25 ± 6.02 mg/dL at 60-min.]**
 
 - Kingma, D. P., & Ba, J. (2015). Adam: A method for stochastic
   optimization. *3rd International Conference on Learning Representations
@@ -639,14 +634,11 @@ memory. Verification status is noted per entry.
   (2024). IoMT innovations in diabetes management: Predictive models
   using wearable data. *Expert Systems with Applications, 238*, Article
   121994. https://doi.org/10.1016/j.eswa.2023.121994 **[Verified —
-  extracted directly from the PDF (Elsevier, Expert Systems with
-  Applications). RMSE confirmed from the abstract: Random Forest model,
-  18.60 mg/dL at a 30-min horizon (six-hour input window), and 26.21
-  mg/dL at 45-min horizon, on the authors' own passively-monitored
+  extracted directly from the source PDF. Reported result: Random Forest
+  model, 18.60 mg/dL RMSE at a 30-min horizon (six-hour input window),
+  and 26.21 mg/dL at 45-min, on the authors' own passively-monitored
   cohort of 40 DM1 patients (also corroborated on 10 Type 2 DM patients
-  as a proof of concept) — NOT OhioT1DM. The literature-comparison
-  slides must label this dataset as the custom 40-patient DM1 cohort,
-  not OhioT1DM or a generic "Custom."]**
+  as a proof of concept) — not OhioT1DM.]**
 
 - Srivastava, N., Mansimov, E., & Salakhutdinov, R. (2015). Unsupervised
   learning of video representations using LSTMs. *Proceedings of the 32nd
