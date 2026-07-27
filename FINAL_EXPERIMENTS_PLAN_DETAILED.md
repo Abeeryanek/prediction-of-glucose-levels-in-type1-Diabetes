@@ -3,6 +3,99 @@
 Blood Glucose Forecasting — University of Duisburg-Essen
 Khalil & Abeer | 17 July 2026
 
+## 0. Unification First
+
+**Step 0 (prerequisite for everything else): unify all 5 models across
+all 3 datasets under one pipeline and identical training conditions.**
+
+**Current state**:
+
+- OhioT1DM + Glucdict: shared `src/` pipeline, 5 models (RF, LSTM,
+  Autoencoder, TCN, Transformer).
+- BIG IDEAs: separate `experiments/` pipeline, a different model set (RF,
+  GB, LSTM, CNN-LSTM, Transformer), and different training conditions
+  (clinically-weighted MSE, `max_epochs=100`, `batch_size=64`,
+  `shuffle=True` for some models, 15% val split, no fixed seed).
+
+**Unification actions**:
+
+1. Run all 5 shared models (RF, LSTM, Autoencoder, TCN, Transformer) on
+   BIG IDEAs. Autoencoder and TCN are already coded for BIG IDEAs (§8A.1);
+   they will be run end-to-end as the first task.
+2. Align BIG IDEAs training conditions to the shared standard (§1):
+   `max_epochs=150`, `patience=15`, `batch_size=32`, `shuffle=False`, 20%
+   chronological val split, `torch.manual_seed(42)`.
+3. Result: identical model set + identical training conditions on all 3
+   datasets, so every subsequent experiment (interpolation, LOPO,
+   ablation) produces directly comparable cross-dataset results.
+
+**No new experiment in the sections below is run until Step 0 is
+complete.**
+
+**Expected outcome**: BIG IDEAs RMSE for RF/LSTM/Transformer should stay
+close to the numbers already in `experiments/results/bigideas/` (§3),
+since those 3 models are already common to both pipelines — the main
+unknowns are the first Autoencoder/TCN numbers on BIG IDEAs, which do not
+exist yet.
+
+**Feeds into**: every later cross-dataset claim in this document (§3
+horizon comparison, §6 interpolation, §7 ablation, §8/§8A LOPO) — none of
+those are directly comparable across all 3 datasets until this step is
+done.
+
+## 0A. Interpolation Pre-Test (before grid search)
+
+Per the supervisor's explicit instruction, interpolation is prioritized
+and gets a small pre-test **before** the full grid search (§2):
+
+Run 3–4 proven interpolation setups on **one representative patient per
+dataset**:
+
+1. Drop baseline (current default, no imputation).
+2. Linear interpolation, max gap ≤ 30 min (6 steps).
+3. Linear interpolation + median filter (window = 5).
+4. *(optional 4th setup, time permitting)* — spline or forward-fill, to
+   bracket the linear-interpolation result.
+
+**Decision rule**: if the interpolation benefit confirms — expected
+direction from Hameed & Kleinberg (2020): 42.71 → 19.80 mg/dL unfiltered
+LSTM RMSE, though that magnitude was measured on noisier free-living data
+and is not a direct estimate for our OhioT1DM baseline (§6, §9 H3) —
+adopt interpolation as the **default preprocessing** for all subsequent
+experiments and drop the non-interpolated variants from the full matrix
+(§6), saving complexity there.
+
+**Grid search ordering (explicit, so this doesn't contradict §2)**: the
+existing grid-search best parameters (§2.1–§2.5) were already tuned, on
+non-interpolated data, before interpolation was reprioritized to run
+first. Adopting interpolation as default preprocessing does **not**
+trigger a grid-search re-run — the cached parameters in
+`grid_search_results.json` are reused as-is on interpolated data, exactly
+like the existing global-reuse-across-patients/datasets pattern already
+documented as a known limitation in §2. Re-tuning grid search specifically
+on interpolated data is an **optional stretch goal** if time permits, not
+a requirement, given the Week 1–3 timeline (§10, item 1) — and if
+pursued, it would run *after* the interpolation decision below, not
+before it.
+
+**Reprioritized experiment order** (per supervisor, supersedes the
+priority question previously raised in §10):
+
+1. **Interpolation** (§6) — all 3 datasets.
+2. **LOPO** (§8) — all 5 models.
+3. Window-size (§4) — moved down; see the open question in §10 on
+   whether to cut or rescope it.
+
+**Expected outcome**: the pre-test confirms a small, positive RMSE
+improvement from interpolation (consistent in direction with Hameed &
+Kleinberg 2020, though likely much smaller in magnitude on OhioT1DM's
+cleaner CGM stream — see §9 H3's ~1–2 mg/dL estimate).
+
+**Feeds into**: if confirmed, this collapses the full §6 interpolation
+matrix from 19 configurations down to a single adopted configuration
+applied everywhere, and that adopted configuration becomes the new
+default preprocessing for §7 ablation and §8 LOPO as well.
+
 ## 1. Standard Training Conditions (applies to ALL experiments unless stated)
 
 | Setting                 | Value                                                                                                     | Reasoning                                                                  |
@@ -18,6 +111,17 @@ Khalil & Abeer | 17 July 2026
 | Normalisation           | `StandardScaler`, fit on training data only                                                               | Prevents test/val leakage into scaler statistics                           |
 | Random seed             | 42                                                                                                        | See note below — currently only set for Random Forest                      |
 | Hardware                | NVIDIA GPU (CUDA) if available, else CPU (`torch.device("cuda" if torch.cuda.is_available() else "cpu")`) | All prior runs (`run_log_epochs.txt`) executed on CUDA                     |
+
+**The split is three-way, not two.** Per the supervisor's note that
+"validation only exists if there's a further split": every patient's data
+is divided into (1) the **official train set**, (2) a **validation set**
+carved out of the last 20% of that train set, chronological
+(`val_ratio=0.20`), used only for early stopping and hyperparameter
+selection, and (3) the **official held-out test set**, used only for the
+final reported metrics. The model never sees the test set during training
+or early stopping — validation and test are distinct sets from distinct
+sources (an internal chronological split vs. the dataset's own official
+split), not the same 20% used twice.
 
 **Three code changes are required before Sections 3–9 can run under these
 conditions, and should be confirmed with the supervisor before implementation:**
@@ -62,6 +166,26 @@ validation. The resulting best parameters (`results/ohio/grid_search_results.jso
 were then applied globally to every patient and every dataset. This is a
 known limitation, addressed in §2.6.
 
+**Note on interpolation ordering**: this grid search was already run, on
+non-interpolated data, before interpolation was reprioritized to run
+first (§0A appears earlier in this document, but not chronologically
+before this search). If §0A's pre-test adopts interpolation as default
+preprocessing, these cached parameters are reused as-is rather than
+re-tuned — see §0A's explicit ordering note for why this is not a
+contradiction.
+
+**Note on hyperparameter value selection**: the specific numeric *values*
+tested below (e.g., `hidden_size` ∈ {32, 64, 128}, `num_filters` ∈ {32,
+64, 128}, `d_model` ∈ {32, 64, 128}, `latent_size` ∈ {16, 32, 64}) are
+standard defaults — powers of two spanning small/medium/large capacity —
+chosen to bracket the conventional range at feasible compute cost, not
+derived from a specific source. The citations in the tables below justify
+*which* hyperparameter matters and *why* a search over capacity/learning
+rate is worthwhile, not the specific numbers chosen. Only the Adam base
+learning rate (1e-3) is a cited default (Kingma & Ba 2015); the halved
+5e-4 is tested as a lower-variance alternative for these small
+per-patient datasets, not itself a literature value.
+
 ### 2.1 Random Forest
 
 | Parameter        | Values tested  | Best found | Why this range                                                                                         |
@@ -74,31 +198,36 @@ known limitation, addressed in §2.6.
 
 | Parameter   | Values tested | Best found | Why this range                                                                                                         |
 | ----------- | ------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------- |
-| hidden_size | [32, 64, 128] | 128        | Anchored to Kalita & Mirza (2025)                                                                                      |
+| hidden_size | [32, 64, 128] | 128        | Standard small/medium/large capacity bracket (see note above) — not derived from Kalita & Mirza (2025) or any specific source |
 | lr          | [1e-3, 5e-4]  | 5e-4       | Kingma & Ba (2015) default is 1e-3; halved value tested as a lower-variance alternative for small per-patient datasets |
 
 ### 2.3 Autoencoder (Seq2Seq)
 
 | Parameter   | Values tested | Best found | Why this range                                                                                                                                               |
 | ----------- | ------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| latent_size | [16, 32, 64]  | 16         | Srivastava et al. (2015): a tight bottleneck forces the encoder to retain only the dominant glucose trend, reducing overfitting on ~12k-row per-patient data |
+| latent_size | [16, 32, 64]  | 16         | Standard small/medium/large capacity bracket (see note above). Srivastava et al. (2015) motivates *why* a tight bottleneck is worth testing (forces the encoder to retain only the dominant glucose trend, reducing overfitting on ~12k-row per-patient data) — the specific values 16/32/64 are not derived from that paper |
 | lr          | [1e-3, 5e-4]  | 5e-4       | Same reasoning as §2.2                                                                                                                                       |
 
 ### 2.4 TCN
 
 | Parameter   | Values tested | Best found | Why this range                                                                                                            |
 | ----------- | ------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------- |
-| num_filters | [32, 64, 128] | 32         | Bai et al. (2018): fewer filters per layer with dilation depth doing the representational work, rather than channel width |
+| num_filters | [32, 64, 128] | 32         | Standard small/medium/large capacity bracket (see note above). Bai et al. (2018) motivates *why* fewer filters may suffice (dilation depth doing the representational work, rather than channel width) — the specific values are not derived from that paper |
 | lr          | [1e-3, 5e-4]  | 5e-4       | Same reasoning as §2.2                                                                                                    |
 
 ### 2.5 Transformer
 
 | Parameter | Values tested | Best found | Why this range                                                |
 | --------- | ------------- | ---------- | ------------------------------------------------------------- |
-| d_model   | [32, 64, 128] | 128        | Vaswani et al. (2017); must be divisible by `nhead=4` (fixed) |
+| d_model   | [32, 64, 128] | 128        | Standard small/medium/large capacity bracket (see note above), constrained to be divisible by `nhead=4` (fixed); not derived from Vaswani et al. (2017) |
 | lr        | [1e-3, 5e-4]  | 5e-4       | Same reasoning as §2.2                                        |
 
 ### 2.6 Planned Grid Search Expansion
+
+**Prediction horizon**: grid search is run at the 30-min horizon (the
+primary clinical target); the resulting best parameters are reused across
+the 15/30/45-min horizons reported in §3, they are not re-searched
+per-horizon.
 
 Not yet covered by the existing grid search, to be added:
 
@@ -122,14 +251,29 @@ Not yet covered by the existing grid search, to be added:
   today, is not justified without checking this — different CGM devices,
   sampling behaviour, and feature sets could shift the optimum.
 
+**Expected outcome**: joint window_size × hyperparameter search likely
+shifts TCN's best `num_filters`/dilation combination the most, since TCN
+is the model hypothesized to be most sensitive to window size (§4); RF
+and LSTM parameters are expected to be comparatively stable across window
+sizes.
+
+**Feeds into**: directly informs whether the standalone window-size sweep
+(§4) is still needed once this joint search exists, or whether it already
+answers the same question — see the open question in §10.
+
 ## 3. Multi-Horizon Analysis (15, 30, 45 min — NOT only 30)
 
 All experiments in Sections 4–8 will report **15-min (3 steps), 30-min (6
-steps), and 45-min (9 steps)** horizons. The shared OhioT1DM/Glucdict
-pipeline (`src/training/pipeline.py`) currently predicts a single fixed
-`horizon=6` (30 min); it will be extended to also run `horizon=9` for the
-45-min report, reusing the already-implemented multi-step target machinery
-(`multi_step=True` path in `create_windows`).
+steps), and 45-min (9 steps)** horizons, **on all 3 datasets** —
+OhioT1DM, Glucdict, and now BIG IDEAs, once Step 0 (§0) unification makes
+BIG IDEAs directly comparable to the other two. The shared
+OhioT1DM/Glucdict pipeline (`src/training/pipeline.py`) currently predicts
+a single fixed `horizon=6` (30 min); it will be extended to also run
+`horizon=9` for the 45-min report, reusing the already-implemented
+multi-step target machinery (`multi_step=True` path in `create_windows`).
+The input window is **12 steps (1h)** as the default across all 3
+datasets (the window-size sweep in §4 varies this; everywhere else in
+this document, 12 steps is assumed unless stated otherwise).
 
 **Horizon degradation already measured on OhioT1DM** (`results/ohio/run_log_epochs.txt`,
 12 patients, mean RMSE, mg/dL):
@@ -185,16 +329,36 @@ OhioT1DM and Glucdict also have 45-min results from the shared pipeline,
 and pair each with a patient-level glucose-SD figure per dataset to
 directly test H1 vs. H2.
 
-**Known caveat**: BIG IDEAs currently uses a different model set (RF, GB,
-LSTM, CNN-LSTM, Transformer via Abeer's `experiments/` pipeline) than the
-shared OhioT1DM/Glucdict pipeline (RF, LSTM, Autoencoder, TCN,
-Transformer). This mismatch (GB/CNN-LSTM vs. Autoencoder/TCN) must be
-resolved — either by running the shared 5-model set on BIG IDEAs or by
-explicitly scoping the cross-dataset comparison to the 3 models common to
-both (RF, LSTM, Transformer) — before any 3-dataset, 5-model claim can be
-made in the final report.
+**Known caveat (resolved by §0)**: BIG IDEAs currently uses a different
+model set (RF, GB, LSTM, CNN-LSTM, Transformer via Abeer's `experiments/`
+pipeline) than the shared OhioT1DM/Glucdict pipeline (RF, LSTM,
+Autoencoder, TCN, Transformer). This mismatch (GB/CNN-LSTM vs.
+Autoencoder/TCN) is exactly what Step 0 (§0) unification addresses before
+any experiment in this section runs — no 3-dataset, 5-model claim is made
+until that unification is complete.
+
+**Expected outcome**: once BIG IDEAs is unified (§0) and run through
+15/30/45-min horizons, its horizon-degradation slope is expected to
+remain far shallower than OhioT1DM's (consistent with the 20–40× gap
+already observed here), supporting H2 (persistence-like ceiling) over H1
+(population volatility) unless the glucose-SD comparison below says
+otherwise.
+
+**Feeds into**: the H1-vs-H2 test in §9 (via the planned per-horizon
+slope + glucose-SD comparison above), and directly determines whether the
+"worse than literature" narrative in §9 needs a BIG IDEAs-specific
+caveat.
 
 ## 4. Window Size Experiments
+
+**Status: open question for the meeting, not yet resolved** — the
+supervisor noted this overlaps the grid-search `window_size` sweep
+(§2.6). Whether this standalone experiment should be cut, kept as-is, or
+rescoped to cover only what the joint grid search in §2.6 does not (e.g.,
+a window-size sweep at fixed best hyperparameters rather than searched
+jointly) is to be decided together with the supervisor — see §10. The
+experiment as originally scoped is described below unchanged, pending
+that decision.
 
 - **Window sizes to test**: 12 (1h, current default), 24 (2h), 36 (3h), 72
   (6h) steps.
@@ -214,6 +378,13 @@ made in the final report.
   than TCN's dilated convolutions would if given enough input.
 - **Metric**: RMSE per (model, window, horizon), plus Clarke Zone A % at
   the 30-min horizon for the clinical-safety angle.
+
+**Expected outcome (if run)**: TCN improves the most as window size
+increases; LSTM saturates early — see the hypothesis above.
+
+**Feeds into**: H6 in §9, and clarifies whether TCN's current last-place
+ranking (§3, §7) is an architecture limitation or a starved-context
+artifact.
 
 ## 5. Preprocessing Comparison and Planned Changes
 
@@ -235,9 +406,18 @@ Two decisions are deliberate departures:
 
 | Discrepancy         | Current | Literature                                                     | Planned change                                                                                          | Expected effect                                                                                                                                                                      |
 | ------------------- | ------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Missing sensor rows | Drop    | Interpolate (bounded)                                          | Test bounded linear interpolation, max gap 30 min (6 steps)                                             | Reduce data loss on `full`/`wearable` feature sets, which currently lose the most rows (e.g. clean-cohort `full`/`wearable`: n=1,796 vs. `glucose_only`: n=10,742 — an 83% row loss) |
+| Missing sensor rows | Drop    | Interpolate (bounded); Hameed & Kleinberg (2020) use this exact bound — their Table 4 specifies "linear interpolation... for gaps ≤ 30 min" | Test bounded linear interpolation, max gap 30 min (6 steps)                                             | Reduce data loss on `full`/`wearable` feature sets, which currently lose the most rows (e.g. clean-cohort `full`/`wearable`: n=1,796 vs. `glucose_only`: n=10,742 — an 83% row loss) |
 | Missing glucose     | Drop    | Mixed (Martinsson: drop; Hameed & Kleinberg: interpolate)       | Test linear interpolation for gaps ≤ 3 steps (15 min) only — never fabricate glucose across longer gaps | More training data without contaminating ground truth over clinically meaningful gaps                                                                                                |
-| CGM smoothing       | None    | Median filter (used in some imputation-focused follow-up work) | Test median filter, window=5 (25 min)                                                                   | Reduce sensor noise; test whether this recovers some of the RMSE gap to literature (H4, §9)                                                                                          |
+| CGM smoothing       | None    | Median filter, window=5 samples — Hameed & Kleinberg (2020) use this exact value (their Table 4: "Median filter window size = 5"), which they in turn attribute to Zhu et al. (2018) | Test median filter, window=5 (25 min)                                                                   | Reduce sensor noise; test whether this recovers some of the RMSE gap to literature (H4, §9)                                                                                          |
+
+**Expected outcome**: bounded interpolation recovers most of the row loss
+on `full`/`wearable` feature sets (currently an 83% loss, §7.1) without
+materially changing RMSE, since the gaps being filled are short relative
+to glucose's autocorrelation timescale.
+
+**Feeds into**: the interpolation pre-test (§0A) and full matrix (§6)
+directly test the first two rows of this table; the median-filter test
+feeds H4 in §9.
 
 ## 6. Interpolation Experiments (multiple combinations)
 
@@ -271,7 +451,25 @@ Full matrix — interpolation method × max gap length × filtering:
   than a directly transferable estimate for our ~1–2 mg/dL expectation
   below (§9, H3).
 
+**Expected outcome**: consistent with the §0A pre-test, a modest (~1–2
+mg/dL) RMSE improvement from bounded linear interpolation — smaller than
+Hameed & Kleinberg's (2020) 22.91 mg/dL figure since that was measured on
+noisier free-living data (§9, H3).
+
+**Feeds into**: if the pre-test (§0A) confirms the benefit, this
+experiment's scope collapses from the full 19-configuration matrix to
+validating the single adopted configuration on the full 12-patient
+cohort; the adopted configuration then becomes the default preprocessing
+for §7 ablation and §8 LOPO.
+
 ## 7. Feature Ablation — Complete Matrix
+
+**Setup**: ablation uses RF and LSTM (the fastest tree-based and
+recurrent models, respectively) at the 30-min horizon, with the
+grid-search-best hyperparameters (§2), on the unified pipeline (§0).
+Autoencoder/TCN/Transformer are not run per feature set here to keep the
+ablation matrix tractable — RF and LSTM are used as representative
+proxies for tree-based and sequence models respectively.
 
 ### 7.1 OhioT1DM 2018 (heart rate + steps available)
 
@@ -371,6 +569,16 @@ Planned: nutritional rolling-window feature subsets (Abeer) — e.g.
 carbs/calories summed over the last 1h/3h/6h — to test whether _aggregated_
 nutritional signal helps where raw wearable channels do not.
 
+**Expected outcome**: the "wearable features hurt" pattern already
+confirmed on OhioT1DM 2018/2020 and partially on Glucdict (§7.3) is
+expected to replicate on BIG IDEAs once ablation runs there post-
+unification (§0) — though BIG IDEAs' already-poor `full`-set RMSE (§7.4)
+suggests the effect may be harder to isolate from a weak overall signal.
+
+**Feeds into**: directly answers H1 in §9 (feature count vs. gap-to-
+literature), and the isolated clinical_hr/clinical_steps comparison feeds
+the "which wearable signal hurts more" question raised for future work.
+
 ## 8. LOPO Extension (all 5 models, not just RF+LSTM)
 
 The completed LOPO run (`results/ohio/results_lopo.csv`) covers only RF and
@@ -408,7 +616,19 @@ model-dependence pattern holds architecture-wide.
 population generalisation holds on prediabetic data, per `FUTURE_WORK_PLAN.md`)
 is a separate, larger extension — no Glucdict LOPO script exists yet. Given
 the timeline (§10), this is deprioritised behind the OhioT1DM 5-model LOPO
-extension unless the supervisor flags it as required (see §11).
+extension unless the supervisor flags it as required (see §10, item 4).
+
+**Expected outcome**: the existing RF/LSTM pattern (LSTM degrades
+slightly under pooling, RF sometimes improves) is expected to extend to
+Autoencoder and Transformer (recurrent/attention-based, so LSTM-like),
+while TCN's behaviour is the open unknown — its convolutional filters may
+generalise differently under pooling than either recurrent or tree-based
+models.
+
+**Feeds into**: directly answers whether "personalisation barely
+matters" (a claim already made from RF/LSTM alone in
+`PRESENTATION_MONDAY.md`) holds architecture-wide before it is presented
+as a general finding.
 
 ## 8A. BIG IDEAs Pipeline — Current State and Alignment (Abeer)
 
@@ -426,9 +646,10 @@ needed to reconcile them.
 | Common to both             | RF, LSTM, Transformer                   |
 
 Autoencoder and TCN have now been **coded** for BIG IDEAs but **not yet run
-end-to-end** — no result numbers exist for them yet. This directly changes
-the answer to open question 6 (§11): full 5-model unification is now
-feasible, pending that run.
+end-to-end** — no result numbers exist for them yet. This is what makes
+full 5-model unification (§0) feasible as a committed first step rather
+than an open question: both models exist, they simply need their first
+end-to-end run.
 
 ### 8A.2 Training Condition Differences (must be reconciled)
 
@@ -451,6 +672,12 @@ LSTM/CNN-LSTM/Transformer/RF/GB over Autoencoder/TCN in any RMSE
 comparison, and must be resolved (apply uniformly, or document why not)
 before Autoencoder/TCN results are compared against the other three.
 
+**Open question for the meeting** (added to §10): adopt clinically-
+weighted MSE uniformly across all 5 models and all 3 datasets, or keep it
+scoped to BIG IDEAs? This affects cross-model comparability and we want
+to decide it with the supervisor rather than resolve it unilaterally
+here.
+
 ### 8A.3 Shuffle Experiment (BIG IDEAs specific)
 
 Because consecutive windows overlap by 11 of 12 timesteps, with
@@ -466,6 +693,17 @@ assumption.
   per-model inconsistency (§8A.2) is actively affecting which model looks
   better in today's BIG IDEAs results, and this must be resolved before any
   cross-model comparison on BIG IDEAs is treated as fair.
+
+**Expected outcome**: `shuffle=True` is expected to produce a small RMSE
+change (likely a modest improvement, since it breaks the highly-
+overlapping consecutive-minibatch structure), plausibly explaining part
+of why BIG IDEAs currently shuffles 3 of 5 models rather than being an
+arbitrary inconsistency.
+
+**Feeds into**: directly informs the open question on clinically-weighted
+MSE scope and shuffle policy in §8A.2/§10 — if shuffle matters, it must
+be applied uniformly across all 5 BIG IDEAs models before any cross-model
+comparison (§8A.2) is treated as fair.
 
 ### 8A.4 BIG IDEAs Ablation — More Granular Than OhioT1DM
 
@@ -485,6 +723,15 @@ extending, not replacing. Planned revisions:
   `carbs_30min` vs. `carbs_1h` vs. `carbs_4h`, rather than only as a
   combined nutritional block — feeds into the planned nutritional-subset
   experiment already noted in §7.4.
+
+**Expected outcome**: individual wearable-signal isolation (EDA,
+heart_rate, BVP, IBI) is expected to show heterogeneous effects rather
+than a uniform "all wearable signals hurt" pattern, consistent with the
+heartrate-vs-accelerometer split already found on Glucdict (§7.3).
+
+**Feeds into**: the granular BIG IDEAs ablation directly extends the
+cross-dataset feature-effect comparison in §7 once combined with
+OhioT1DM/Glucdict results.
 
 ### 8A.5 BIG IDEAs Grid Search
 
@@ -532,6 +779,14 @@ discovering it after the fact.
   patient boundaries (matching the shared pipeline's LOPO fold construction
   in §8 — windows must never span two different patients' timelines).
 
+**Expected outcome**: given BIG IDEAs' near-zero/negative R² already
+observed (§3), pooling across the 16 patients may show a smaller
+personalised-vs-LOPO gap than OhioT1DM's, since there is less
+patient-specific signal to lose in the first place.
+
+**Feeds into**: directly extends the personalisation-vs-pooling question
+(§8) to a third dataset, completing the cross-dataset LOPO comparison.
+
 ## 9. Why Our Results Are Worse Than Literature — Hypotheses to Test
 
 | Hypothesis                                                                                | How we test it                                                                                                                                                 | Expected finding                                                                                                                                         |
@@ -544,8 +799,9 @@ discovering it after the fact.
 | H6: shorter window (12 steps = 1h vs. literature's use of longer context in some studies) | Window experiment (§4)                                                                                                                                         | TCN improves the most; LSTM saturates early                                                                                                              |
 
 Note H1 as currently framed is already in tension with our own §7 data —
-this should be raised explicitly with the supervisor (§11) rather than
-quietly resolved, since it changes the shape of the final narrative.
+this should be raised explicitly with the supervisor (§10, item 5) rather
+than quietly resolved, since it changes the shape of the final
+narrative.
 
 ## 10. Open Questions for Supervisor
 
@@ -553,16 +809,28 @@ quietly resolved, since it changes the shape of the final narrative.
    to 60-min? (60-min was in the original OhioT1DM BGLP-challenge
    convention per `PREPROCESSING_COMPARISON.md`, but is not currently
    planned here given the Week 1–3 timeline.)
-2. Should the interpolation experiments (§6) run on all 3 datasets or
-   OhioT1DM only, given the 19–24-configuration matrix is already
-   substantial on one dataset?
-3. Priority order if time runs short: LOPO 5-model extension (§8),
-   interpolation matrix (§6), or window-size sweep (§4)?
+2. ~~Should the interpolation experiments (§6) run on all 3 datasets or
+   OhioT1DM only~~ — **RESOLVED per supervisor**: all 3 datasets (§0A),
+   with a small pre-test first to decide whether the full matrix is even
+   needed.
+3. ~~Priority order if time runs short~~ — **RESOLVED per supervisor**:
+   interpolation (§6) first, then LOPO 5-model extension (§8);
+   window-size sweep (§4) moved down — see item 6 below for the
+   remaining scope question on §4.
 4. Is Glucdict LOPO (flagged in §8, not yet started) in scope for this
    final round, or deferred entirely?
 5. How should we frame H1 in §9, given our own feature-ablation data
    contradicts the "fewer features explain the gap" hypothesis as
    originally stated?
+6. **Window-size experiment (§4)**: the supervisor noted this overlaps
+   the grid-search `window_size` sweep (§2.6). Cut this standalone
+   experiment, or scope it to what grid search doesn't cover (e.g.,
+   window size as a fixed sweep at best hyperparameters, rather than
+   searched jointly)? To be decided together.
+7. **Clinically-weighted MSE (§8A.2)**: adopt it uniformly across all 5
+   models and all 3 datasets, or keep it scoped to BIG IDEAs? This
+   affects cross-model comparability and we want to decide it with the
+   supervisor.
 
 ## References
 
