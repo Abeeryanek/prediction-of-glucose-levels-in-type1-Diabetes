@@ -1,5 +1,24 @@
 ## Session Summary — Latest
 
+## ⚠️ RESULTS/CODE STATE MISMATCH (Path A)
+Code is now at FINAL training conditions: 150 max_epochs, patience 15,
+batch_size 32, seed 42 (all DL models + run scripts).
+BUT all committed results (results_all_models.csv, LOPO, ablation,
+Glucdict, and the presentation's RMSE/Zone-A/epoch numbers) were
+generated at the OLD settings (100/10/64, no seed).
+→ These numbers are STALE. Do NOT present them as current.
+→ Full re-run at final settings happens ONCE, after BIG IDEAs
+  unification is complete. Until then, code ≠ results.
+→ Presentation epoch table (LSTM 54.5, AE 72.4, TCN 51.6, TR 42.1)
+  will change after re-run.
+
+## Unification progress (Section 0)
+- [DONE] Training conditions aligned: 150/15/32 + seed (this commit)
+- [WAITING] Clinically-weighted MSE — needs Abeer's weighting scheme
+  as reference (both plain + weighted MSE, per supervisor)
+- [BLOCKED] All 5 models on BIG IDEAs — waiting on Abeer to confirm
+  where her AE/TCN BIG IDEAs code lives (not on any pushed branch yet)
+
 ### ALL experiments complete
 - 5 models (RF, LSTM, Autoencoder, TCN, Transformer)
 - Clarke Error Grid unified with Abeer via clarke-error-grid library v0.1.4
