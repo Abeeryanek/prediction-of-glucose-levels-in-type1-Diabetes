@@ -27,7 +27,7 @@ from torch.utils.data import DataLoader, TensorDataset
 from src.evaluation.metrics import rmse, mae
 
 
-def _make_loader(X: np.ndarray, y: np.ndarray, batch_size: int = 64) -> DataLoader:
+def _make_loader(X: np.ndarray, y: np.ndarray, batch_size: int = 32) -> DataLoader:
     ds = TensorDataset(
         torch.tensor(X, dtype=torch.float32),
         torch.tensor(y, dtype=torch.float32),
@@ -134,8 +134,8 @@ def train_model(
     y_val: np.ndarray,
     model: GlucoseTransformer,
     lr: float = 1e-3,
-    max_epochs: int = 100,
-    patience: int = 10,
+    max_epochs: int = 150,
+    patience: int = 15,
 ) -> tuple[GlucoseTransformer, dict, int]:
     """
     Train a GlucoseTransformer with Adam and early stopping.
@@ -148,8 +148,8 @@ def train_model(
     y_train / y_val : (n_samples, horizon)  normalised glucose
     model           : GlucoseTransformer instance
     lr              : Adam learning rate (default 1e-3)
-    max_epochs      : hard epoch cap (default 100)
-    patience        : early-stopping patience (default 10)
+    max_epochs      : hard epoch cap (default 150)
+    patience        : early-stopping patience (default 15)
 
     Returns
     -------
@@ -157,6 +157,9 @@ def train_model(
         history = {'train_loss': [...], 'val_loss': [...]}
         actual_epochs = number of epochs actually run before early stopping
     """
+    torch.manual_seed(42)
+    np.random.seed(42)
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
