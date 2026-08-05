@@ -82,7 +82,7 @@ np.random.seed(RANDOM_SEED)
 torch.manual_seed(RANDOM_SEED)
 
 MODEL_NAME = "cnnlstm"
-# window_size integer (12) defines the fixed sequence length for the CNN-LSTM
+
 WINDOW_SIZES = {"1h": 12}
 HORIZONS = {"15min": 3, "30min": 6, "45min": 9}
 N_SPLITS = 5 
