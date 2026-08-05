@@ -581,13 +581,13 @@ for window_label, window_size in WINDOW_SIZES.items():
     # FEATURE SETS
     # -------------------------------------------------------------------------
     all_features = (
-        ["Glucose"] + temporal_features + sensor_cols
+        ["Glucose"] + temporal_features 
         + food_features_all + activity_features + physio_features_all
     )
     all_features = [f for f in all_features if f in df_w.columns]
 
     all_features_comparable = (
-        ["Glucose"] + temporal_features + sensor_cols
+        ["Glucose"] + temporal_features 
         + food_features_carbs + activity_features + physio_hr
     )
     all_features_comparable = [f for f in all_features_comparable if f in df_w.columns]
