@@ -14,49 +14,47 @@ matplotlib.rcParams["font.size"] = 11
 # ---------------------------------------------------------------------------
 
 def _draw_ceg_boundaries(ax: plt.Axes) -> None:
-    """Draw the Clarke Error Grid zone boundary lines on ax."""
+    """
+    Draw the Clarke Error Grid zone boundary lines on ax.
+
+    Line segments mirror clarke_error_grid.core.plot() exactly (same
+    third-party library that src.evaluation.metrics.clarke_error_grid() now
+    uses for zone classification), so the plotted grid visually matches how
+    points are actually being classified — this function draws lines only;
+    it does not itself classify anything.
+    """
     lw = 0.8
     c = "black"
 
     # Identity line
-    ax.plot([0, 400], [0, 400], color=c, linewidth=lw, linestyle="--", zorder=1)
+    ax.plot([0, 400], [0, 400], color=c, linewidth=lw, linestyle=":", zorder=1)
 
-    # Zone A: ±20 % lines (start from origin to avoid artefacts at low values)
-    ax.plot([0, 400], [0, 480], color=c, linewidth=lw, zorder=1)   # +20 %  (clipped at 400 by axis limit)
-    ax.plot([0, 400], [0, 320], color=c, linewidth=lw, zorder=1)   # -20 %
-
-    # Zone E upper-left boundary box (r ≤ 70, p ≥ 180)
-    ax.plot([0, 70],   [180, 180], color=c, linewidth=lw, zorder=1)  # horizontal ceiling
-    ax.plot([70, 70],  [180, 400], color=c, linewidth=lw, zorder=1)  # vertical right wall
-
-    # Zone E lower-right boundary box (r ≥ 180, p ≤ 70)
-    ax.plot([180, 400], [70, 70],  color=c, linewidth=lw, zorder=1)  # horizontal floor
-    ax.plot([180, 180], [0, 70],   color=c, linewidth=lw, zorder=1)  # vertical left wall
-
-    # Zone D right (r ≥ 240, 70 < p ≤ 180)
-    ax.plot([240, 240], [70, 180], color=c, linewidth=lw, zorder=1)  # vertical left boundary
-    ax.plot([240, 400], [70, 70],  color=c, linewidth=lw, zorder=1)  # horizontal floor extension
-    ax.plot([240, 400], [180, 180], color=c, linewidth=lw, zorder=1) # horizontal ceiling extension
-
-    # Zone D left (r ≤ 70, 120 ≤ p ≤ 180)
-    ax.plot([0, 70],  [120, 120], color=c, linewidth=lw, zorder=1)   # horizontal floor of left-D
-
-    # Zone C upper boundary: p = r + 110 for r in [70, 290]
-    r_c = np.array([70, 290])
-    ax.plot(r_c, r_c + 110, color=c, linewidth=lw, zorder=1)
+    ax.plot([0, 175 / 3],         [70, 70],   color=c, linewidth=lw, zorder=1)
+    ax.plot([175 / 3, 400 / 1.2], [70, 400],  color=c, linewidth=lw, zorder=1)
+    ax.plot([70, 70],             [84, 400],  color=c, linewidth=lw, zorder=1)
+    ax.plot([0, 70],              [180, 180], color=c, linewidth=lw, zorder=1)
+    ax.plot([70, 290],            [180, 400], color=c, linewidth=lw, zorder=1)
+    ax.plot([70, 70],             [0, 56],    color=c, linewidth=lw, zorder=1)
+    ax.plot([70, 400],            [56, 320],  color=c, linewidth=lw, zorder=1)
+    ax.plot([180, 180],           [0, 70],    color=c, linewidth=lw, zorder=1)
+    ax.plot([180, 400],           [70, 70],   color=c, linewidth=lw, zorder=1)
+    ax.plot([240, 240],           [70, 180],  color=c, linewidth=lw, zorder=1)
+    ax.plot([240, 400],           [180, 180], color=c, linewidth=lw, zorder=1)
+    ax.plot([130, 180],           [0, 70],    color=c, linewidth=lw, zorder=1)
 
 
 def _label_ceg_zones(ax: plt.Axes) -> None:
+    """Zone label positions mirror clarke_error_grid.core.plot() exactly."""
     kw = dict(fontsize=13, fontweight="bold", color="dimgrey", zorder=2)
     ax.text(30,  15,  "A", **kw)
-    ax.text(370, 340, "A", **kw)
-    ax.text(160, 370, "B", **kw)
-    ax.text(360, 10,  "B", **kw)
-    ax.text(30,  330, "E", **kw)
-    ax.text(370, 30,  "E", **kw)
-    ax.text(30,  145, "D", **kw)
-    ax.text(330, 115, "D", **kw)
+    ax.text(370, 260, "B", **kw)
+    ax.text(280, 370, "B", **kw)
     ax.text(160, 370, "C", **kw)
+    ax.text(160, 15,  "C", **kw)
+    ax.text(30,  140, "D", **kw)
+    ax.text(370, 120, "D", **kw)
+    ax.text(30,  370, "E", **kw)
+    ax.text(370, 15,  "E", **kw)
 
 
 def plot_clarke_error_grid(
@@ -67,6 +65,14 @@ def plot_clarke_error_grid(
 ) -> plt.Figure:
     """
     Scatter plot of (reference, predicted) glucose pairs with zone boundaries.
+
+    This renders a static matplotlib PNG for the pipeline's saved figures.
+    The `clarke-error-grid` library also provides a Plotly-based plot()
+    (interactive HTML), which we don't use here — but the boundary lines
+    drawn below are kept identical to it. NOTE: zone COUNTS/percentages for
+    any title or annotation come from clarke_error_grid() in metrics.py
+    (library-backed); this function only draws the scatter and grid lines,
+    it does not classify points itself.
 
     Parameters
     ----------

@@ -1,0 +1,163 @@
+============================================================
+Loading OhioT1DM — all 12 patients (train + test combined) ...
+============================================================
+  559: 13310 rows (train+test combined)
+  563: 14694 rows (train+test combined)
+  570: 13727 rows (train+test combined)
+  575: 14456 rows (train+test combined)
+  588: 15431 rows (train+test combined)
+  591: 13607 rows (train+test combined)
+  540: 14842 rows (train+test combined)
+  544: 13339 rows (train+test combined)
+  552: 11444 rows (train+test combined)
+  567: 13247 rows (train+test combined)
+  584: 14815 rows (train+test combined)
+  596: 13620 rows (train+test combined)
+
+RF params   : {'n_estimators': 200, 'max_depth': 10, 'min_samples_leaf': 4}
+LSTM        : hidden_size=128, lr=0.0005
+Autoencoder : latent_size=16, lr=0.0005
+TCN         : num_filters=32, lr=0.0005
+Transformer : d_model=128, nhead=4, lr=0.0005
+Device: cuda
+
+============================================================
+Running LOPO cross-validation — 2 modes x 12 folds x 5 models ...
+============================================================
+
+------------------------------------------------------------
+MODE: pooled
+------------------------------------------------------------
+[pooled | test=559] (2018)  train on 11 patients ... RF=26.73  LSTM=26.64  AE=26.67  TCN=32.65  Transformer=26.62  (epochs LSTM=37 AE=45 TCN=19 Tr=40)
+[pooled | test=563] (2018)  train on 11 patients ... RF=17.88  LSTM=17.37  AE=17.36  TCN=19.04  Transformer=17.58  (epochs LSTM=38 AE=62 TCN=31 Tr=75)
+[pooled | test=570] (2018)  train on 11 patients ... RF=18.92  LSTM=18.89  AE=19.32  TCN=23.14  Transformer=18.41  (epochs LSTM=31 AE=40 TCN=17 Tr=87)
+[pooled | test=575] (2018)  train on 11 patients ... RF=24.29  LSTM=23.40  AE=23.22  TCN=25.56  Transformer=24.11  (epochs LSTM=30 AE=43 TCN=23 Tr=44)
+[pooled | test=588] (2018)  train on 11 patients ... RF=22.20  LSTM=21.52  AE=21.57  TCN=23.24  Transformer=22.17  (epochs LSTM=35 AE=51 TCN=20 Tr=31)
+[pooled | test=591] (2018)  train on 11 patients ... RF=25.60  LSTM=24.74  AE=24.68  TCN=27.66  Transformer=25.76  (epochs LSTM=30 AE=36 TCN=16 Tr=57)
+[pooled | test=540] (2020)  train on 11 patients ... RF=23.33  LSTM=22.31  AE=22.22  TCN=26.54  Transformer=22.97  (epochs LSTM=35 AE=56 TCN=20 Tr=82)
+[pooled | test=544] (2020)  train on 11 patients ... RF=19.80  LSTM=19.47  AE=19.68  TCN=61.05  Transformer=19.94  (epochs LSTM=30 AE=48 TCN=14 Tr=69)
+[pooled | test=552] (2020)  train on 11 patients ... RF=20.94  LSTM=20.61  AE=20.38  TCN=22.28  Transformer=21.11  (epochs LSTM=37 AE=50 TCN=19 Tr=33)
+[pooled | test=567] (2020)  train on 11 patients ... RF=25.91  LSTM=25.33  AE=25.24  TCN=27.47  Transformer=26.28  (epochs LSTM=31 AE=66 TCN=14 Tr=49)
+[pooled | test=584] (2020)  train on 11 patients ... RF=28.75  LSTM=28.55  AE=28.90  TCN=33.22  Transformer=29.14  (epochs LSTM=32 AE=45 TCN=17 Tr=45)
+[pooled | test=596] (2020)  train on 11 patients ... RF=19.40  LSTM=20.52  AE=20.26  TCN=27.25  Transformer=19.91  (epochs LSTM=22 AE=79 TCN=15 Tr=17)
+
+------------------------------------------------------------
+MODE: per_patient_scaled
+------------------------------------------------------------
+[per_patient_scaled | test=559] (2018)  train on 11 patients ... RF=26.70  LSTM=25.98  AE=25.80  TCN=30.33  Transformer=26.72  (epochs LSTM=34 AE=39 TCN=16 Tr=36)
+[per_patient_scaled | test=563] (2018)  train on 11 patients ... RF=17.64  LSTM=17.14  AE=17.28  TCN=19.08  Transformer=17.82  (epochs LSTM=33 AE=52 TCN=30 Tr=57)
+[per_patient_scaled | test=570] (2018)  train on 11 patients ... RF=19.59  LSTM=19.23  AE=19.59  TCN=21.57  Transformer=18.60  (epochs LSTM=38 AE=40 TCN=13 Tr=63)
+[per_patient_scaled | test=575] (2018)  train on 11 patients ... RF=23.95  LSTM=23.11  AE=23.05  TCN=25.94  Transformer=24.30  (epochs LSTM=34 AE=58 TCN=16 Tr=39)
+[per_patient_scaled | test=588] (2018)  train on 11 patients ... RF=22.42  LSTM=21.38  AE=21.40  TCN=22.42  Transformer=21.93  (epochs LSTM=35 AE=48 TCN=18 Tr=62)
+[per_patient_scaled | test=591] (2018)  train on 11 patients ... RF=25.41  LSTM=24.94  AE=25.00  TCN=27.63  Transformer=25.56  (epochs LSTM=33 AE=53 TCN=15 Tr=50)
+[per_patient_scaled | test=540] (2020)  train on 11 patients ... RF=23.00  LSTM=22.31  AE=22.22  TCN=24.66  Transformer=23.20  (epochs LSTM=32 AE=55 TCN=18 Tr=70)
+[per_patient_scaled | test=544] (2020)  train on 11 patients ... RF=19.81  LSTM=19.21  AE=19.22  TCN=21.51  Transformer=19.74  (epochs LSTM=37 AE=44 TCN=27 Tr=59)
+[per_patient_scaled | test=552] (2020)  train on 11 patients ... RF=20.92  LSTM=20.58  AE=20.49  TCN=23.49  Transformer=21.14  (epochs LSTM=35 AE=42 TCN=36 Tr=59)
+[per_patient_scaled | test=567] (2020)  train on 11 patients ... RF=25.96  LSTM=25.47  AE=25.19  TCN=26.93  Transformer=26.46  (epochs LSTM=32 AE=42 TCN=17 Tr=37)
+[per_patient_scaled | test=584] (2020)  train on 11 patients ... RF=28.27  LSTM=28.08  AE=28.31  TCN=30.23  Transformer=28.36  (epochs LSTM=36 AE=58 TCN=23 Tr=58)
+[per_patient_scaled | test=596] (2020)  train on 11 patients ... RF=19.26  LSTM=19.04  AE=19.09  TCN=22.05  Transformer=19.06  (epochs LSTM=44 AE=43 TCN=17 Tr=57)
+
+LOPO loop complete.
+
+========================================================================================
+LOPO RESULTS — mean +/- std RMSE [mg/dL], per mode / horizon / model
+========================================================================================
+
+Mode: pooled
+  Horizon: 15min
+    RF              RMSE: 13.63 +/- 2.43   MAE: 8.51   Zone A: 96.3%   epochs: n/a
+    LSTM            RMSE: 13.58 +/- 2.38   MAE: 8.63   Zone A: 96.2%   epochs: 32.3
+    Autoencoder     RMSE: 13.63 +/- 2.40   MAE: 8.59   Zone A: 96.4%   epochs: 51.8
+    TCN             RMSE: 20.55 +/- 15.40   MAE: 10.29   Zone A: 93.8%   epochs: 18.8
+    Transformer     RMSE: 13.97 +/- 2.57   MAE: 8.82   Zone A: 96.0%   epochs: 52.4
+  Horizon: 30min
+    RF              RMSE: 22.81 +/- 3.50   MAE: 15.65   Zone A: 85.5%   epochs: n/a
+    LSTM            RMSE: 22.45 +/- 3.37   MAE: 15.46   Zone A: 85.9%   epochs: 32.3
+    Autoencoder     RMSE: 22.46 +/- 3.39   MAE: 15.47   Zone A: 86.2%   epochs: 51.8
+    TCN             RMSE: 29.09 +/- 10.85   MAE: 18.48   Zone A: 79.9%   epochs: 18.8
+    Transformer     RMSE: 22.83 +/- 3.61   MAE: 15.51   Zone A: 85.9%   epochs: 52.4
+  Horizon: 45min
+    RF              RMSE: 30.26 +/- 4.32   MAE: 21.74   Zone A: 74.7%   epochs: n/a
+    LSTM            RMSE: 29.81 +/- 4.14   MAE: 21.38   Zone A: 75.6%   epochs: 32.3
+    Autoencoder     RMSE: 29.80 +/- 4.10   MAE: 21.49   Zone A: 75.4%   epochs: 51.8
+    TCN             RMSE: 38.64 +/- 12.62   MAE: 25.65   Zone A: 68.0%   epochs: 18.8
+    Transformer     RMSE: 30.26 +/- 4.30   MAE: 21.48   Zone A: 75.4%   epochs: 52.4
+
+Mode: per_patient_scaled
+  Horizon: 15min
+    RF              RMSE: 13.64 +/- 2.38   MAE: 8.47   Zone A: 96.3%   epochs: n/a
+    LSTM            RMSE: 13.38 +/- 2.32   MAE: 8.39   Zone A: 96.2%   epochs: 35.2
+    Autoencoder     RMSE: 13.50 +/- 2.34   MAE: 8.57   Zone A: 96.3%   epochs: 47.8
+    TCN             RMSE: 15.53 +/- 2.92   MAE: 9.56   Zone A: 95.0%   epochs: 20.5
+    Transformer     RMSE: 13.92 +/- 2.41   MAE: 8.72   Zone A: 96.0%   epochs: 53.9
+  Horizon: 30min
+    RF              RMSE: 22.75 +/- 3.38   MAE: 15.57   Zone A: 85.7%   epochs: n/a
+    LSTM            RMSE: 22.21 +/- 3.37   MAE: 15.10   Zone A: 86.6%   epochs: 35.2
+    Autoencoder     RMSE: 22.22 +/- 3.31   MAE: 15.24   Zone A: 86.6%   epochs: 47.8
+    TCN             RMSE: 24.65 +/- 3.60   MAE: 17.37   Zone A: 81.6%   epochs: 20.5
+    Transformer     RMSE: 22.74 +/- 3.55   MAE: 15.41   Zone A: 86.2%   epochs: 53.9
+  Horizon: 45min
+    RF              RMSE: 30.25 +/- 4.19   MAE: 21.71   Zone A: 74.7%   epochs: n/a
+    LSTM            RMSE: 29.47 +/- 4.22   MAE: 20.91   Zone A: 76.5%   epochs: 35.2
+    Autoencoder     RMSE: 29.49 +/- 4.01   MAE: 21.15   Zone A: 75.9%   epochs: 47.8
+    TCN             RMSE: 32.65 +/- 4.19   MAE: 24.21   Zone A: 69.7%   epochs: 20.5
+    Transformer     RMSE: 30.01 +/- 4.44   MAE: 21.20   Zone A: 76.1%   epochs: 53.9
+
+Saved: results/ohio/results_lopo_full.csv
+
+========================================================================================
+PERSONALISED vs. LOPO gap — mean RMSE, per horizon / model / mode
+========================================================================================
+
+Horizon: 15min
+  RF              Personalised: 14.06 mg/dL
+    pooled               LOPO: 13.63 mg/dL   Gap: -0.43 mg/dL
+    per_patient_scaled   LOPO: 13.64 mg/dL   Gap: -0.41 mg/dL
+  LSTM            Personalised: 12.85 mg/dL
+    pooled               LOPO: 13.58 mg/dL   Gap: +0.73 mg/dL
+    per_patient_scaled   LOPO: 13.38 mg/dL   Gap: +0.53 mg/dL
+  Autoencoder     Personalised: 13.22 mg/dL
+    pooled               LOPO: 13.63 mg/dL   Gap: +0.41 mg/dL
+    per_patient_scaled   LOPO: 13.50 mg/dL   Gap: +0.28 mg/dL
+  TCN             Personalised: 14.94 mg/dL
+    pooled               LOPO: 20.55 mg/dL   Gap: +5.61 mg/dL
+    per_patient_scaled   LOPO: 15.53 mg/dL   Gap: +0.59 mg/dL
+  Transformer     Personalised: 14.27 mg/dL
+    pooled               LOPO: 13.97 mg/dL   Gap: -0.30 mg/dL
+    per_patient_scaled   LOPO: 13.92 mg/dL   Gap: -0.35 mg/dL
+
+Horizon: 30min
+  RF              Personalised: 23.34 mg/dL
+    pooled               LOPO: 22.81 mg/dL   Gap: -0.53 mg/dL
+    per_patient_scaled   LOPO: 22.75 mg/dL   Gap: -0.60 mg/dL
+  LSTM            Personalised: 21.49 mg/dL
+    pooled               LOPO: 22.45 mg/dL   Gap: +0.96 mg/dL
+    per_patient_scaled   LOPO: 22.21 mg/dL   Gap: +0.72 mg/dL
+  Autoencoder     Personalised: 21.59 mg/dL
+    pooled               LOPO: 22.46 mg/dL   Gap: +0.87 mg/dL
+    per_patient_scaled   LOPO: 22.22 mg/dL   Gap: +0.63 mg/dL
+  TCN             Personalised: 24.13 mg/dL
+    pooled               LOPO: 29.09 mg/dL   Gap: +4.96 mg/dL
+    per_patient_scaled   LOPO: 24.65 mg/dL   Gap: +0.52 mg/dL
+  Transformer     Personalised: 22.38 mg/dL
+    pooled               LOPO: 22.83 mg/dL   Gap: +0.46 mg/dL
+    per_patient_scaled   LOPO: 22.74 mg/dL   Gap: +0.36 mg/dL
+
+Horizon: 45min
+  RF              Personalised: 30.71 mg/dL
+    pooled               LOPO: 30.26 mg/dL   Gap: -0.45 mg/dL
+    per_patient_scaled   LOPO: 30.25 mg/dL   Gap: -0.46 mg/dL
+  LSTM            Personalised: 28.66 mg/dL
+    pooled               LOPO: 29.81 mg/dL   Gap: +1.15 mg/dL
+    per_patient_scaled   LOPO: 29.47 mg/dL   Gap: +0.81 mg/dL
+  Autoencoder     Personalised: 28.71 mg/dL
+    pooled               LOPO: 29.80 mg/dL   Gap: +1.09 mg/dL
+    per_patient_scaled   LOPO: 29.49 mg/dL   Gap: +0.79 mg/dL
+  TCN             Personalised: 32.13 mg/dL
+    pooled               LOPO: 38.64 mg/dL   Gap: +6.51 mg/dL
+    per_patient_scaled   LOPO: 32.65 mg/dL   Gap: +0.53 mg/dL
+  Transformer     Personalised: 29.40 mg/dL
+    pooled               LOPO: 30.26 mg/dL   Gap: +0.86 mg/dL
+    per_patient_scaled   LOPO: 30.01 mg/dL   Gap: +0.61 mg/dL
+
+Done.

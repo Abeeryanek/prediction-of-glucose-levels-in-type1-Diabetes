@@ -189,11 +189,11 @@ ranking with clinical-accuracy evidence, not just RMSE.
 | Model | RMSE [mg/dL] | Gap to ours |
 |-------|-------------|-------------|
 | MHA-NBEATS (Kalita & Mirza 2025) | 16.57 | — |
-| Xiong et al. | 19.33 | — |
-| Rodríguez-Rodríguez | 18.60 | — |
-| **Our LSTM** | **21.21** | +1.9 vs. Xiong |
-| Our Autoencoder | 21.41 | +2.1 vs. Xiong |
-| Our Transformer | 22.91 | +3.6 vs. Xiong |
+| Bertachi et al. (2018) | 19.33 | — |
+| Rodríguez-Rodríguez (custom 40-patient DM1 dataset) | 18.60 | — |
+| **Our LSTM** | **21.21** | +1.9 vs. Bertachi |
+| Our Autoencoder | 21.41 | +2.1 vs. Bertachi |
+| Our Transformer | 22.91 | +3.6 vs. Bertachi |
 | **Our RF** | **23.35** | +4.8 vs. Rodríguez |
 
 - Our models use **3 features**; literature uses 5–6 features
@@ -204,7 +204,7 @@ ranking with clinical-accuracy evidence, not just RMSE.
 # Slide 11 — Key Findings
 
 1. **Grid Search matters:** +2–3 mg/dL improvement over default parameters
-2. **LSTM best at 30 min** (21.21), Autoencoder essentially tied — only 1.7 mg/dL behind Xiong et al.
+2. **LSTM best at 30 min** (21.21), Autoencoder essentially tied — only 1.7 mg/dL behind Bertachi et al. (2018)
 3. **Tuned Transformer (22.91) now beats RF and TCN** — was worse than both when untuned
 4. **TCN still underperforms:** OhioT1DM is too small / window too short for TCN's advantage to show
 5. **More features hurt, not help:** on BOTH OhioT1DM and Glucdict, glucose_only/clinical beat every feature set that adds heartrate/steps — confirmed via RMSE and Clarke Zone A/D
