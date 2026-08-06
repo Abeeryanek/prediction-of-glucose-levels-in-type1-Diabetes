@@ -1,55 +1,33 @@
 ## Session Summary — Latest
 
-## ⚠️ RESULTS/CODE STATE MISMATCH (Path A)
-Code is now at FINAL training conditions: 150 max_epochs, patience 15,
-batch_size 32, seed 42 (all DL models + run scripts).
-BUT all committed results (results_all_models.csv, LOPO, ablation,
-Glucdict, and the presentation's RMSE/Zone-A/epoch numbers) were
-generated at the OLD settings (100/10/64, no seed).
-→ These numbers are STALE. Do NOT present them as current.
-→ Full re-run at final settings happens ONCE, after BIG IDEAs
-  unification is complete. Until then, code ≠ results.
-→ Presentation epoch table (LSTM 54.5, AE 72.4, TCN 51.6, TR 42.1)
-  will change after re-run.
+## Consolidation progress (one shared pipeline)
+DONE:
+- Training conditions unified in src/models (150/15/32 + seed) — committed
+- Clinically-weighted MSE ported to src/training/losses.py — verified
+  identical to Abeer's (match within 1e-6), committed (db8a154)
+- Weight scheme: <54→3.0, 54-70→2.5, in-range→1.0, 180-250→1.5, >250→2.0
+  (hypo weighted hardest — clinically justified)
 
-## Unification progress (Section 0)
-- [DONE] Training conditions aligned: 150/15/32 + seed (this commit)
-- [WAITING] Clinically-weighted MSE — needs Abeer's weighting scheme
-  as reference (both plain + weighted MSE, per supervisor)
-- [BLOCKED] All 5 models on BIG IDEAs — waiting on Abeer to confirm
-  where her AE/TCN BIG IDEAs code lives (not on any pushed branch yet)
+⚠️ BLOCKER FOUND — normalization mismatch (resolve FIRST tomorrow):
+- OUR pipeline z-scores glucose before training → loss sees SCALED values
+- ABEER's weighted MSE operates on mg/dL → weights (54/70/180/250) are
+  real glucose thresholds
+- Wiring her loss into our scaled pipeline as-is would be SILENTLY WRONG
+  (thresholds meaningless on z-scored values)
+- SAME risk applies to porting her CNN-LSTM/GB models: if they expect
+  un-scaled input, dropping them into our scaled pipeline = garbage
 
-### ALL experiments complete
-- 5 models (RF, LSTM, Autoencoder, TCN, Transformer)
-- Clarke Error Grid unified with Abeer via clarke-error-grid library v0.1.4
-- 45-min horizon added (results at 15/30/45 for all models)
-- LOPO complete: 5 models, 3 horizons, 2 modes (pooled + per_patient_scaled)
+NEEDS ABEER (asked, awaiting answer):
+1. Unified pipeline: keep z-scoring + un-scale inside loss for weighting
+   (proposed Option A)?
+2. Do her CNN-LSTM/GB models expect scaled or un-scaled input?
 
-### ALL email TODOs done
-- Grid search documented (GRID_SEARCH_DOCUMENTATION.md)
-- Finer preprocessing analysis (PREPROCESSING_DISCREPANCIES_DETAILED.md)
-- Detailed experiment plan sent to professor (awaiting his OK)
+DO NOT tomorrow until resolved:
+- Do NOT wire weighted loss into models yet
+- Do NOT port her 2 models yet
+- Both depend on the normalization decision
 
-### Key LOPO findings
-- Personalisation gap small (0.3-1.2 mg/dL) across ALL 5 models
-- per_patient_scaled beats pooled — answers professor's variation request
-- TCN highlight: pooled gap +6.51 at 45min → +0.53 with per-patient 
-  scaling. TCN's weakness was inter-patient baseline differences.
-
-### TOMORROW — the only thing left: THE PRESENTATION
-BLOCKER: need the Moodle presentation template (professor requires it).
-Step 1: get template from Moodle course, add to repo
-Step 2: build deck in that template with all results
-
-Presentation must include:
-- Best feature combo per model (data ready)
-- Multi-horizon 15/30/45 results
-- Clarke at all horizons (unified library)
-- LOPO all 5 models + pooled vs per_patient_scaled
-- Transfer slide with "Personalised" clarification
-- Grid search all datasets
-- Preprocessing discrepancies (5)
-- Three findings WITH Glucdict caveat (wearables "do not improve" 
-  not "consistently hurt" — Glucdict glucose_activity is exception)
-
-### Poster: Abeer done. Abeer's horizon investigation: Abeer done.
+## Also still pending (unrelated to consolidation):
+- Full re-run at final settings (150/15/32) — all current results are
+  STALE, from old 100/10/64 settings. Presentation numbers will change.
+- Presentation still in custom style, not Moodle template
