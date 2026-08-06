@@ -1,18 +1,37 @@
 """
-cnn_lstm.py — CNN-LSTM, Window Size x Horizon Walk-Forward Pipeline
-================================================================================
-Aligned to FINAL_EXPERIMENTS_PLAN.md:
+transformer.py — Transformer Encoder, Window Size x Horizon Walk-Forward Pipeline
+=====================================================================================
+Aligned to FINAL_EXPERIMENTS_PLAN.md and identical structure to cnn_lstm.py /
+autoencoder.py — only the model architecture differs.
 
-- Plain MSELoss everywhere (§1, §8A.2) — clinically-weighted MSE removed
-- Grid: hidden_dim [32,64,128] x lr [1e-3, 5e-4] (§2.8, §8A.5)
+Architecture (Vaswani et al. 2017):
+  1. Input projection   nn.Linear(n_features, d_model)
+  2. Positional encoding (sinusoidal)
+  3. nn.TransformerEncoder (batch_first=True, num_layers stacked layers)
+  4. Last-timestep readout  out[:, -1, :]
+  5. Prediction head     nn.Linear(d_model, 1)
+
+- Clinically-weighted MSELoss (hypo/hyper sample weights)
+- Grid: d_model [32,64,128] x lr [1e-3, 5e-4] (§2.5, §8A.5)
 - Window sizes: 1h/2h/3h/6h (12/24/36/72 steps) — grid sweep (§2.6, §8A.6)
 - Per-patient row-count check before large windows (§8A.6)
 - LOPO removed (§10 item 3)
 - Food columns: exact plain names, linear interpolation (§0A)
+- Lag removed from main feature sets — lag is ablation-only (design point 1)
+- Glucose baseline included in all ablation groups except lag (design point 3)
+- Rolling features computed per-window via merge-based alignment (no reindex bug)
+- Strict time-based sequence validation (float-minute tolerance)
 - max_epochs=150, patience=15, batch_size=32, shuffle=False,
   val_ratio=0.20, seed=42 (§1)
+
+References
+----------
+Vaswani et al. (2017) "Attention is All You Need"
+Xiong et al. (2025) — Transformer on OhioT1DM, RMSE 19.33 mg/dL
+Kalita & Mirza (2025) — multi-head attention on OhioT1DM, RMSE 16.57 mg/dL
 """
 import glob
+import math
 import os
 import json
 import pickle
@@ -47,15 +66,12 @@ RANDOM_SEED = 42
 np.random.seed(RANDOM_SEED)
 torch.manual_seed(RANDOM_SEED)
 
-MODEL_NAME = "cnnlstm"
+MODEL_NAME = "transformer"
 
-# §2.6, §8A.6 — window size is now a grid sweep, not a single fixed value
 WINDOW_SIZES = {"1h": 12, "2h": 24, "3h": 36, "6h": 72}
+HORIZONS     = {"15min": 3, "30min": 6, "45min": 9}
+N_SPLITS     = 5
 
-HORIZONS = {"15min": 3, "30min": 6, "45min": 9}
-N_SPLITS  = 5
-
-# §1 — standard training conditions
 MAX_EPOCHS = 150
 PATIENCE   = 15
 BATCH_SIZE = 32
@@ -65,16 +81,13 @@ SHUFFLE    = False
 GRID_SEARCH_EPOCHS   = 30
 GRID_SEARCH_PATIENCE = 5
 
-LOPO_MIN_TRAIN_ROWS = 200   # kept for reference, LOPO not run (§10 item 3)
-LOPO_MIN_TEST_ROWS  = 50
+# §2.5, §8A.5 — transformer grid: d_model x lr
+# nhead fixed at 4 — d_model values must all be divisible by 4
+DL_PARAM_GRID = {"d_model": [32, 64, 128], "lr": [1e-3, 5e-4]}
 
-# §2.8, §8A.5 — CNN-LSTM grid: hidden_dim x lr only
-DL_PARAM_GRID = {"hidden_dim": [32, 64, 128], "lr": [1e-3, 5e-4]}
-
-# §8A.6 — exact plain food column names after fix_food_features.py
 FOOD_COLS = ["calorie", "total_carb", "dietary_fiber", "sugar", "protein", "total_fat"]
 
-print(f"\n{'='*70}\nCNN-LSTM — WINDOW x HORIZON WALK-FORWARD PIPELINE\n{'='*70}")
+print(f"\n{'='*70}\nTRANSFORMER — WINDOW x HORIZON WALK-FORWARD PIPELINE\n{'='*70}")
 
 # ============================================================================
 # 1. LOAD DATA
@@ -107,23 +120,23 @@ df["Hour_cos"]        = np.cos(2 * np.pi * df["Hour"] / 24)
 temporal_features = ["Hour", "Minute", "DayOfWeek", "MinFromMidnight",
                      "Hour_sin", "Hour_cos"]
 
-# define sensor_cols BEFORE use
+# sensor_cols defined before use
 sensor_cols = [c for c in ["Heart_Rate", "Acc_Vmu", "EDA", "Skin_Temp", "BVP", "IBI"]
                if c in df.columns]
 
-# §5, §6 — bounded linear interpolation for sensors, max gap 6 steps (30 min)
+# bounded linear interpolation for sensors, max gap 6 steps (30 min)
 for col in sensor_cols:
     df[col] = (
         df.groupby("Patient_ID")[col]
           .transform(lambda x: x.interpolate(method="linear", limit=6))
     )
-print(f"  Sensors interpolated (limit=6 steps / 30 min): {sensor_cols}")
+print(f"  Sensors interpolated (limit=6 / 30 min): {sensor_cols}")
 
 # food column detection — exact plain names, no trailing underscore
 food_features_all   = [c for c in df.columns if c in FOOD_COLS]
 food_features_carbs = [c for c in df.columns if c == "total_carb"]
 
-# §0A — plain linear interpolation for food, no limit
+# plain linear interpolation for food, no limit
 for col in food_features_all:
     df[col] = (
         df.groupby("Patient_ID")[col]
@@ -161,22 +174,27 @@ def build_walk_forward_folds(df_in, n_splits):
         folds.append((df_tr, df_te))
     return folds
 
-def calculate_clinical_weights(y_true):
-    weights = np.ones(len(y_true), dtype=np.float32)
-    weights[y_true < 54] = 3.0
-    weights[(y_true >= 54) & (y_true < 70)] = 2.5
-    weights[(y_true > 180) & (y_true <= 250)] = 1.5
-    weights[y_true > 250] = 2.0
-    return weights
 
 # ============================================================================
-# 4. 3D SEQUENCE BUILDER (Time-Locked)
+# 4. CLINICAL SAMPLE WEIGHTING
+# ============================================================================
+def calculate_clinical_weights(y_true):
+    weights = np.ones(len(y_true), dtype=np.float32)
+    weights[y_true < 54]                      = 3.0
+    weights[(y_true >= 54) & (y_true < 70)]   = 2.5
+    weights[(y_true > 180) & (y_true <= 250)] = 1.5
+    weights[y_true > 250]                      = 2.0
+    return weights
+
+
+# ============================================================================
+# 5. 3D SEQUENCE BUILDER (Time-Locked)
 # ============================================================================
 def create_3d_sequences(X_scaled, y_series, patient_ids, timestamps, seq_length):
     """
     Builds (N, seq_length, n_features) arrays.
     Skips sequences spanning patient boundaries or timestamp gaps.
-    Uses float-minute tolerance to avoid ns vs minute precision issues.
+    Float-minute tolerance avoids ns vs minute precision mismatches.
     """
     patient_ids      = np.asarray(patient_ids)
     timestamps       = np.asarray(timestamps, dtype="datetime64[ns]")
@@ -227,7 +245,7 @@ def build_seq_dataset(df_tr, df_te, features, target_col, seq_length):
 
 
 # ============================================================================
-# 5. MODEL DEFINITION
+# 6. MODEL DEFINITION — Transformer Encoder (§2.5, Vaswani et al. 2017)
 # ============================================================================
 class GlucoseDataset(Dataset):
     def __init__(self, x, y, weights):
@@ -242,28 +260,91 @@ class GlucoseDataset(Dataset):
         return self.x[idx], self.y[idx], self.w[idx]
 
 
-class GlucoseCNNLSTM(nn.Module):
-    def __init__(self, input_dim, hidden_dim=64, num_layers=2,
-                 dropout=0.3, cnn_filters=64, kernel_size=3):
+class _PositionalEncoding(nn.Module):
+    """
+    Sinusoidal positional encoding.
+    PE(pos, 2i)   = sin(pos / 10000^(2i/d_model))
+    PE(pos, 2i+1) = cos(pos / 10000^(2i/d_model))
+    """
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 512):
         super().__init__()
-        self.conv1 = nn.Conv1d(input_dim, cnn_filters, kernel_size)
-        self.relu  = nn.ReLU()
-        self.lstm  = nn.LSTM(cnn_filters, hidden_dim, num_layers,
-                             batch_first=True, dropout=dropout)
-        self.fc    = nn.Linear(hidden_dim, 1)
+        self.dropout = nn.Dropout(p=dropout)
 
-    def forward(self, x):
-        x = x.permute(0, 2, 1)
-        x = self.relu(self.conv1(x))
-        x = x.permute(0, 2, 1)
-        lstm_out, _ = self.lstm(x)
-        return self.fc(lstm_out[:, -1, :])
+        pe       = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(
+            torch.arange(0, d_model, 2, dtype=torch.float)
+            * (-math.log(10000.0) / d_model)
+        )
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer("pe", pe.unsqueeze(0))  # (1, max_len, d_model)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + self.pe[:, : x.size(1)]
+        return self.dropout(x)
+
+
+class GlucoseTransformer(nn.Module):
+    """
+    Transformer encoder: (batch, seq_len, n_features) → (batch, 1)
+
+    Every input timestep attends to every other timestep simultaneously via
+    multi-head self-attention, giving a global view of the window without the
+    sequential bottleneck of recurrent models (Vaswani et al. 2017).
+
+    Parameters
+    ----------
+    input_dim       : number of input features per timestep
+    d_model         : embedding dimension (must be divisible by nhead=4)
+    nhead           : attention heads, fixed at 4 (§2.5)
+    num_layers      : stacked TransformerEncoderLayer blocks (default 2)
+    dim_feedforward : inner dimension of each feedforward sublayer
+    dropout         : dropout rate
+    """
+    def __init__(
+        self,
+        input_dim: int,
+        d_model: int = 64,
+        nhead: int = 4,
+        num_layers: int = 2,
+        dim_feedforward: int = 128,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.input_proj = nn.Linear(input_dim, d_model)
+        self.pos_enc    = _PositionalEncoding(d_model, dropout=dropout)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
+        self.head    = nn.Linear(d_model, 1)
+
+        # Xavier uniform initialisation for all weight matrices
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x : (batch, seq_len, input_dim)
+        returns : (batch, 1)
+        """
+        x = self.input_proj(x)     # (batch, seq_len, d_model)
+        x = self.pos_enc(x)        # inject position info
+        x = self.encoder(x)        # multi-head self-attention × num_layers
+        return self.head(x[:, -1]) # last timestep → (batch, 1)
 
 
 # ============================================================================
-# 6. TRAINING LOOP — plain MSELoss (§1, §8A.2)
+# 7. TRAINING LOOP — clinically weighted MSE
 # ============================================================================
-def train_cnn_lstm(
+def train_transformer(
     x_train, y_train, sample_weights, input_dim, lr,
     epochs=MAX_EPOCHS, patience=PATIENCE, val_ratio=VAL_RATIO,
     **model_kwargs,
@@ -278,7 +359,7 @@ def train_cnn_lstm(
     yv = torch.tensor(y_train[split:]).unsqueeze(1)
     wv = torch.tensor(sample_weights[split:]).unsqueeze(1)
 
-    model     = GlucoseCNNLSTM(input_dim=input_dim, **model_kwargs)
+    model     = GlucoseTransformer(input_dim=input_dim, **model_kwargs)
     criterion = nn.MSELoss(reduction="none")
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -319,70 +400,30 @@ def train_cnn_lstm(
     model.load_state_dict(best_weights)
     return model, best_val_loss, epochs_trained
 
+
 # ============================================================================
-# 7. GRID SEARCH — §2.8: hidden_dim x lr only
+# 8. GRID SEARCH
 # ============================================================================
 def grid_search_dl(x_train, y_train, sample_weights, input_dim, param_grid):
+    """§2.5: grid is d_model [32,64,128] x lr [1e-3, 5e-4], nhead fixed at 4."""
     keys   = list(param_grid.keys())
     combos = list(product(*[param_grid[k] for k in keys]))
 
     best_score, best_params = float("inf"), {}
     for combo in combos:
         params = dict(zip(keys, combo))
-        _, val_loss, _ = train_cnn_lstm(
+        _, val_loss, _ = train_transformer(
             x_train, y_train, sample_weights, input_dim=input_dim,
             epochs=GRID_SEARCH_EPOCHS, patience=GRID_SEARCH_PATIENCE,
-            hidden_dim=params["hidden_dim"], lr=params["lr"],
+            d_model=params["d_model"], lr=params["lr"],
         )
         if val_loss < best_score:
             best_score, best_params = val_loss, params
     return best_params, best_score
 
 
- # ---- grid search call ----
-    gs_seq = build_seq_dataset(
-        df_train_final, df_test_final,
-        all_features, "Target_30min", SEQ_LENGTH,
-    )
-    if len(gs_seq["X_train"]) == 0:
-        print(f"  ⚠ No sequences for grid search at {window_label} — skipping")
-        continue
-    gs_weights  = calculate_clinical_weights(gs_seq["y_train"])
-    best_params, best_score = grid_search_dl(
-        gs_seq["X_train"], gs_seq["y_train"], gs_weights,
-        input_dim=len(all_features), param_grid=DL_PARAM_GRID,
-    )
-
-    # ---- main training loop call ----
-    seq     = build_seq_dataset(df_tr, df_te, features, target_col, SEQ_LENGTH)
-    if len(seq["X_train"]) == 0 or len(seq["X_test"]) == 0:
-        print(f"  [fold {fold_i}] {subset} {h_label} — no sequences, skipping")
-        continue
-    weights = calculate_clinical_weights(seq["y_train"])
-    model, val_loss, epochs_trained = train_cnn_lstm(
-        seq["X_train"], seq["y_train"], weights,
-        input_dim=len(features),
-        hidden_dim=best_params["hidden_dim"],
-        lr=best_params["lr"],
-    )
-
-    # ---- ablation loop call ----
-    seq     = build_seq_dataset(
-        df_train_final, df_test_final,
-        combo_features, target_col, SEQ_LENGTH,
-    )
-    if len(seq["X_train"]) == 0 or len(seq["X_test"]) == 0:
-        continue
-    weights = calculate_clinical_weights(seq["y_train"])
-    model, _, _ = train_cnn_lstm(
-        seq["X_train"], seq["y_train"], weights,
-        input_dim=len(combo_features),
-        hidden_dim=best_params["hidden_dim"],
-        lr=best_params["lr"],
-    )
-
 # ============================================================================
-# 8. METRICS
+# 9. METRICS
 # ============================================================================
 def metrics_dict(y_true, y_pred):
     return {
@@ -396,7 +437,7 @@ def metrics_dict(y_true, y_pred):
 
 
 # ============================================================================
-# 9. CLARKE ERROR GRID
+# 10. CLARKE ERROR GRID
 # ============================================================================
 def clarke_grid_pooled(pooled_predictions, model_name, out_dir, n_splits):
     for (window_label, subset, horizon), bucket in pooled_predictions.items():
@@ -420,7 +461,7 @@ def clarke_grid_pooled(pooled_predictions, model_name, out_dir, n_splits):
 
 
 # ============================================================================
-# 10. ABLATION BAR PLOT
+# 11. ABLATION BAR PLOT
 # ============================================================================
 def create_bar_plot(ablation_results, title, save_path):
     df_results = pd.DataFrame(ablation_results).T
@@ -469,7 +510,7 @@ all_results, all_ablation_results = [], []
 pooled_predictions = {}
 
 # ============================================================================
-# 11. WINDOW SIZE LOOP — §2.6, §8A.6
+# 12. WINDOW SIZE LOOP
 # ============================================================================
 for window_label, window_size in WINDOW_SIZES.items():
     print(f"\n{'#'*70}\nWINDOW SIZE: {window_label} ({window_size} steps)\n{'#'*70}")
@@ -477,25 +518,24 @@ for window_label, window_size in WINDOW_SIZES.items():
     df_w       = df.copy()
     SEQ_LENGTH = window_size
 
-    # §8A.6 — per-patient row-count check before running large windows
-    min_rows_needed = SEQ_LENGTH + N_SPLITS + 1
+    # §8A.6 — per-patient row-count check
+    min_rows_needed   = SEQ_LENGTH + N_SPLITS + 1
     excluded_patients = []
     for pid, grp in df_w.groupby("Patient_ID"):
         if len(grp) < min_rows_needed:
             excluded_patients.append((pid, len(grp)))
     if excluded_patients:
-        print(f"  ⚠ [{window_label}] {len(excluded_patients)} patient(s) have fewer "
-              f"than {min_rows_needed} rows — will be silently excluded from folds:")
+        print(f"  ⚠ [{window_label}] {len(excluded_patients)} patient(s) below "
+              f"{min_rows_needed} rows:")
         for pid, n in excluded_patients:
             print(f"      Patient {pid}: {n} rows")
     else:
         print(f"  ✓ [{window_label}] All patients have ≥ {min_rows_needed} rows.")
 
-    # Set Timestamp as index for time-based rolling
     temp_time_df = df_w.set_index("Timestamp")
 
     # -------------------------------------------------------------------------
-    # PHYSIOLOGICAL VARIABILITY — time-based rolling (aligned via reindex)
+    # PHYSIOLOGICAL VARIABILITY — merge-based alignment (no reindex bug)
     # -------------------------------------------------------------------------
     print(f"\n[3/10] PHYSIOLOGICAL VARIABILITY anchored to {window_label}...")
     physio_features_all                                   = []
@@ -510,10 +550,14 @@ for window_label, window_size in WINDOW_SIZES.items():
             .groupby("Patient_ID")[col_src]
             .rolling(window_label)
             .std()
-            .reset_index(level=0, drop=True)
-            .sort_index()
+            .reset_index()
+            .rename(columns={col_src: col})
         )
-        df_w[col] = rolled.reindex(df_w["Timestamp"]).values
+        df_w[col] = (
+            df_w[["Patient_ID", "Timestamp"]]
+            .merge(rolled, on=["Patient_ID", "Timestamp"], how="left")[col]
+            .values
+        )
         physio_features_all.append(col)
         target_list.append(col)
 
@@ -524,7 +568,7 @@ for window_label, window_size in WINDOW_SIZES.items():
     _add_std_anchored("Skin_Temp",  physio_skin)
 
     # -------------------------------------------------------------------------
-    # ACTIVITY — time-based rolling (aligned via reindex)
+    # ACTIVITY — merge-based alignment
     # -------------------------------------------------------------------------
     print(f"\n[4/10] ACTIVITY FEATURES anchored to {window_label}...")
     activity_features = []
@@ -537,10 +581,14 @@ for window_label, window_size in WINDOW_SIZES.items():
                 .groupby("Patient_ID")["Acc_Vmu"]
                 .rolling(window_label)
                 .agg(agg_fn)
-                .reset_index(level=0, drop=True)
-                .sort_index()
+                .reset_index()
+                .rename(columns={"Acc_Vmu": col})
             )
-            df_w[col] = rolled.reindex(df_w["Timestamp"]).values
+            df_w[col] = (
+                df_w[["Patient_ID", "Timestamp"]]
+                .merge(rolled, on=["Patient_ID", "Timestamp"], how="left")[col]
+                .values
+            )
         activity_features = [col_mean, col_max]
 
     # -------------------------------------------------------------------------
@@ -552,6 +600,7 @@ for window_label, window_size in WINDOW_SIZES.items():
 
     # -------------------------------------------------------------------------
     # GLUCOSE LAG (ablation only) — exact timestamp shift
+    # lag is NEVER added to main feature sets (design point 1)
     # -------------------------------------------------------------------------
     print(f"\n[5/10] GLUCOSE LAG (ablation-only) anchored to {window_label}...")
     lag_col = f"glucose_lag_{window_label}"
@@ -567,7 +616,7 @@ for window_label, window_size in WINDOW_SIZES.items():
 
     # -------------------------------------------------------------------------
     # TARGET EXTRACTION — exact timestamp shift
-    # §2.6: grid search uses 30-min horizon only; best params reused for 15/45
+    # §2.6: grid search at 30-min horizon only; best params reused for 15/45
     # -------------------------------------------------------------------------
     for h_label in HORIZONS:
         td = pd.Timedelta(h_label.replace("min", "m"))
@@ -581,19 +630,20 @@ for window_label, window_size in WINDOW_SIZES.items():
     # FEATURE SETS
     # -------------------------------------------------------------------------
     all_features = (
-        ["Glucose"] + temporal_features 
+        ["Glucose"] + temporal_features + sensor_cols
         + food_features_all + activity_features + physio_features_all
     )
     all_features = [f for f in all_features if f in df_w.columns]
 
     all_features_comparable = (
-        ["Glucose"] + temporal_features 
+        ["Glucose"] + temporal_features + sensor_cols
         + food_features_carbs + activity_features + physio_hr
     )
     all_features_comparable = [f for f in all_features_comparable if f in df_w.columns]
 
     # -------------------------------------------------------------------------
-    # ABLATION GROUPS (§8A.4 — individual signal isolation)
+    # ABLATION GROUPS
+    # Glucose baseline included in every group except lag (design point 3)
     # -------------------------------------------------------------------------
     feature_groups = {
         "glucose":         ["Glucose"],
@@ -610,7 +660,7 @@ for window_label, window_size in WINDOW_SIZES.items():
         "physio_food":     physio_features_all + food_features_all,
         "food_movement":   food_features_all + activity_features,
         "physio_movement": physio_features_all + activity_features,
-        "lag":             lag_features,
+        "lag":             lag_features,  # no Glucose baseline — design point 3
     }
     feature_groups = {
         name: [f for f in feats if f in df_w.columns]
@@ -629,7 +679,7 @@ for window_label, window_size in WINDOW_SIZES.items():
         print(f"  Fold {i}: train={len(tr):,}  test={len(te):,}")
 
     # -------------------------------------------------------------------------
-    # GRID SEARCH — §2.6: run at 30-min horizon, reuse for 15/45
+    # GRID SEARCH — 30-min horizon only, best params reused for 15/45
     # -------------------------------------------------------------------------
     print(f"\n[7/10] GRID SEARCH ({window_label}, 30-min horizon only)...")
     gs_key = f"{MODEL_NAME}_{window_label}"
@@ -642,11 +692,12 @@ for window_label, window_size in WINDOW_SIZES.items():
             all_features, "Target_30min", SEQ_LENGTH,
         )
         if len(gs_seq["X_train"]) == 0:
-            print(f"  ⚠ No training sequences for grid search at {window_label} — skipping")
+            print(f"  ⚠ No sequences for grid search at {window_label} — skipping")
             continue
 
+        gs_weights  = calculate_clinical_weights(gs_seq["y_train"])
         best_params, best_score = grid_search_dl(
-            gs_seq["X_train"], gs_seq["y_train"],
+            gs_seq["X_train"], gs_seq["y_train"], gs_weights,
             input_dim=len(all_features), param_grid=DL_PARAM_GRID,
         )
         grid_cache[gs_key] = best_params
@@ -670,10 +721,11 @@ for window_label, window_size in WINDOW_SIZES.items():
                           f"no sequences, skipping")
                     continue
 
-                model, val_loss, epochs_trained = train_cnn_lstm(
-                    seq["X_train"], seq["y_train"],
+                weights = calculate_clinical_weights(seq["y_train"])
+                model, val_loss, epochs_trained = train_transformer(
+                    seq["X_train"], seq["y_train"], weights,
                     input_dim=len(features),
-                    hidden_dim=best_params["hidden_dim"],
+                    d_model=best_params["d_model"],
                     lr=best_params["lr"],
                 )
                 model.eval()
@@ -697,7 +749,7 @@ for window_label, window_size in WINDOW_SIZES.items():
                       f"epochs={epochs_trained}")
 
     # -------------------------------------------------------------------------
-    # ABLATION STUDY — §8A.4
+    # ABLATION STUDY
     # -------------------------------------------------------------------------
     print(f"\n[9/10] ABLATION STUDY ({window_label})...")
     for combo_name, combo_features in feature_groups.items():
@@ -713,10 +765,11 @@ for window_label, window_size in WINDOW_SIZES.items():
             if len(seq["X_train"]) == 0 or len(seq["X_test"]) == 0:
                 continue
 
-            model, _, _ = train_cnn_lstm(
-                seq["X_train"], seq["y_train"],
+            weights = calculate_clinical_weights(seq["y_train"])
+            model, _, _ = train_transformer(
+                seq["X_train"], seq["y_train"], weights,
                 input_dim=len(combo_features),
-                hidden_dim=best_params["hidden_dim"],
+                d_model=best_params["d_model"],
                 lr=best_params["lr"],
             )
             model.eval()
@@ -738,7 +791,7 @@ for window_label, window_size in WINDOW_SIZES.items():
 
 
 # ============================================================================
-# 12. SAVE RESULTS
+# 13. SAVE RESULTS
 # ============================================================================
 print(f"\n[SAVE] SAVING RESULTS...")
 
@@ -753,7 +806,6 @@ with open(RESULTS_DIR / f"results_{MODEL_NAME}_pooled_preds.pkl", "wb") as f:
 
 print(f"  Saved results, ablation, pooled_preds for {MODEL_NAME}")
 
-# Summary
 summary = (
     results_df
     .groupby(["window", "subset", "horizon"])
@@ -779,7 +831,7 @@ for window_label in WINDOW_SIZES:
               f"epochs~{r['epochs_mean']:.0f}")
 
 # ============================================================================
-# 13. CLARKE ERROR GRID + ABLATION PLOTS
+# 14. CLARKE ERROR GRID + ABLATION PLOTS
 # ============================================================================
 print(f"\n[PLOTS] CLARKE ERROR GRID + ABLATION PLOTS...")
 clarke_grid_pooled(pooled_predictions, MODEL_NAME, RESULTS_DIR, N_SPLITS)
@@ -795,4 +847,4 @@ for window_label in WINDOW_SIZES:
         RESULTS_DIR / f"ablation_{MODEL_NAME}_{window_label}.png",
     )
 
-print("\nCNN-LSTM pipeline complete (walk-forward + ablation).")
+print("\nTransformer pipeline complete (walk-forward + ablation).")

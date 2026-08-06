@@ -1,53 +1,16 @@
 """
-cnn_lstm.py — CNN-LSTM, Window Size x Horizon Walk-Forward + LOPO Pipeline
+cnn_lstm.py — CNN-LSTM, Window Size x Horizon Walk-Forward Pipeline
 ================================================================================
-Self-contained: no external config/utils modules. Everything in one file.
-Mirrors random_forest.py / gradient_boost.py structurally, adapted for the
-deep-learning training loop (PyTorch, clinical-weighted MSE, early stopping).
+Aligned to FINAL_EXPERIMENTS_PLAN.md:
 
-Key design points:
-
-1. LAG REMOVED FROM MAIN FEATURE SETS. 'full' and 'comparable' no longer include
-   any glucose lag/rate-of-change features. Lag exists ONLY as its own ablation
-   study group ('lag'), studied in isolation — never baked into the main models.
-
-2. ALL LOOKBACK-DEPENDENT FEATURES ARE ANCHORED TO THE CURRENT window_size.
-   Physiological variability (HR/EDA/BVP/IBI/SkinTemp std), activity (Acc_Vmu
-   mean/max), AND the ablation-only glucose lag/roc are all computed using THE
-   SAME window_size as their single rolling window, anchored at 5-min
-   resolution.
-
-3. ABLATION GROUPS ARE ANCHORED TO A GLUCOSE BASELINE (FIX). Every ablation
-   group except 'lag' now includes the current "Glucose" reading alongside
-   the signal being tested — e.g. 'heart_rate' = ["Glucose"] + hr_std_features,
-   not hr_std_features alone. Without this, a model given ONLY heart-rate
-   variability (no glucose signal at all) can't beat a near-constant
-   prediction, which is why every ablation group previously collapsed to
-   similar, uninformative RMSE values regardless of window/horizon. The
-   'lag' group remains the one exception, studying lag/roc in isolation with
-   no glucose baseline added.
-
-4. LOPO (Leave-One-Patient-Out), nested inside the window_size loop, reusing
-   that window's cached grid-search-best hidden_dim/lr. 3D sequences are
-   built PER PATIENT (create_3d_sequences already respects patient boundaries
-   via the patient_ids check), then pooled for training/testing — this
-   guarantees no sequence ever spans two different patients' timelines,
-   matching the safety requirement discussed for LOPO folds.
-
-5. STRICT TIME-BASED SHIFTING. Rolling windows, lag extraction, target horizon 
-   generation, and sequence building are all anchored strictly to timestamp math 
-   rather than row-counts to prevent cross-gap contamination.
-
-Global DL training standards applied here:
-    - max_epochs   = 150
-    - patience     = 15    (early stopping, monitor=val_loss, restore_best_weights)
-    - batch_size   = 32
-    - val_ratio    = 0.20  (last 20% chronological)
-    - shuffle      = False (temporal order preserved)
-    - seed         = 42    (torch.manual_seed + np.random.seed)
-"""
-"""
-cnn_lstm.py — CNN-LSTM, Window Size x Horizon Walk-Forward + LOPO Pipeline
+- Clinically-weighted MSELoss (hypo/hyper sample weights)
+- Grid: hidden_dim [32,64,128] x lr [1e-3, 5e-4] (§2.8, §8A.5)
+- Window sizes: 1h/2h/3h/6h (12/24/36/72 steps) — grid sweep (§2.6, §8A.6)
+- Per-patient row-count check before large windows (§8A.6)
+- LOPO removed (§10 item 3)
+- Food columns: exact plain names, linear interpolation (§0A)
+- max_epochs=150, patience=15, batch_size=32, shuffle=False,
+  val_ratio=0.20, seed=42 (§1)
 """
 import glob
 import os
@@ -86,27 +49,24 @@ torch.manual_seed(RANDOM_SEED)
 
 MODEL_NAME = "cnnlstm"
 
-WINDOW_SIZES = {"1h": 12}
+WINDOW_SIZES = {"1h": 12, "2h": 24, "3h": 36, "6h": 72}
 HORIZONS     = {"15min": 3, "30min": 6, "45min": 9}
 N_SPLITS     = 5
 
-MAX_EPOCHS   = 150
-PATIENCE     = 15
-BATCH_SIZE   = 32
-VAL_RATIO    = 0.20
-SHUFFLE      = False
+MAX_EPOCHS = 150
+PATIENCE   = 15
+BATCH_SIZE = 32
+VAL_RATIO  = 0.20
+SHUFFLE    = False
 
 GRID_SEARCH_EPOCHS   = 30
 GRID_SEARCH_PATIENCE = 5
 
-LOPO_MIN_TRAIN_ROWS = 200
-LOPO_MIN_TEST_ROWS  = 50
-DL_PARAM_GRID = {"hidden_dim": [32, 64, 128], "lr": [1e-4, 1e-3, 1e-2]}
+DL_PARAM_GRID = {"hidden_dim": [32, 64, 128], "lr": [1e-3, 5e-4]}
 
-# FIX 8: exact column names after fix_food_features.py (no trailing underscore)
 FOOD_COLS = ["calorie", "total_carb", "dietary_fiber", "sugar", "protein", "total_fat"]
 
-print(f"\n{'='*70}\nCNN-LSTM — WINDOW x HORIZON WALK-FORWARD + LOPO PIPELINE\n{'='*70}")
+print(f"\n{'='*70}\nCNN-LSTM — WINDOW x HORIZON WALK-FORWARD PIPELINE\n{'='*70}")
 
 # ============================================================================
 # 1. LOAD DATA
@@ -136,32 +96,30 @@ df["DayOfWeek"]       = df["Timestamp"].dt.dayofweek
 df["MinFromMidnight"] = df["Hour"] * 60 + df["Minute"]
 df["Hour_sin"]        = np.sin(2 * np.pi * df["Hour"] / 24)
 df["Hour_cos"]        = np.cos(2 * np.pi * df["Hour"] / 24)
-temporal_features = ["Hour", "Minute", "DayOfWeek", "MinFromMidnight", "Hour_sin", "Hour_cos"]
+temporal_features = ["Hour", "Minute", "DayOfWeek", "MinFromMidnight",
+                     "Hour_sin", "Hour_cos"]
 
-# FIX 1: define sensor_cols BEFORE using it
+# FIX 5/6: sensor_cols defined here and kept in feature lists
 sensor_cols = [c for c in ["Heart_Rate", "Acc_Vmu", "EDA", "Skin_Temp", "BVP", "IBI"]
                if c in df.columns]
 
-# Sensors: linear interpolate, short gaps only
 for col in sensor_cols:
     df[col] = (
         df.groupby("Patient_ID")[col]
           .transform(lambda x: x.interpolate(method="linear", limit=6))
     )
-print(f"  Interpolated {len(sensor_cols)} sensors: {sensor_cols}")
+print(f"  Sensors interpolated (limit=6 / 30 min): {sensor_cols}")
 
-# FIX 1: define food feature lists BEFORE using them
-# FIX 8: match exact column names — no trailing underscore
 food_features_all   = [c for c in df.columns if c in FOOD_COLS]
 food_features_carbs = [c for c in df.columns if c == "total_carb"]
 
-# Food: plain linear interpolation, no limit, no drop
 for col in food_features_all:
     df[col] = (
         df.groupby("Patient_ID")[col]
           .transform(lambda x: x.interpolate(method="linear"))
     )
-print(f"  Food features (all): {food_features_all}  |  (carbs only): {food_features_carbs}")
+print(f"  Food interpolated (no limit): {food_features_all}")
+print(f"  Food carbs only: {food_features_carbs}")
 
 
 # ============================================================================
@@ -194,33 +152,35 @@ def build_walk_forward_folds(df_in, n_splits):
 
 
 # ============================================================================
-# 4. 3D SEQUENCE BUILDER (Time-Locked)
+# 4. CLINICAL SAMPLE WEIGHTING
+# ============================================================================
+def calculate_clinical_weights(y_true):
+    weights = np.ones(len(y_true), dtype=np.float32)
+    weights[y_true < 54]                      = 3.0
+    weights[(y_true >= 54) & (y_true < 70)]   = 2.5
+    weights[(y_true > 180) & (y_true <= 250)] = 1.5
+    weights[y_true > 250]                      = 2.0
+    return weights
+
+
+# ============================================================================
+# 5. 3D SEQUENCE BUILDER (Time-Locked)
 # ============================================================================
 def create_3d_sequences(X_scaled, y_series, patient_ids, timestamps, seq_length):
-    """
-    Builds (N, seq_length, n_features) arrays.
-    Skips sequences that span patient boundaries or contain timestamp gaps.
-    FIX 5: uses float-minute comparison with tolerance to avoid
-            timedelta64[ns] vs timedelta64[m] precision mismatches.
-    """
-    patient_ids     = np.asarray(patient_ids)
-    timestamps      = np.asarray(timestamps, dtype="datetime64[ns]")
+    patient_ids      = np.asarray(patient_ids)
+    timestamps       = np.asarray(timestamps, dtype="datetime64[ns]")
     expected_minutes = (seq_length - 1) * 5
 
     Xs, ys = [], []
     for i in range(seq_length - 1, len(X_scaled)):
-        # Guard 1: no cross-patient sequences
         if patient_ids[i - seq_length + 1] != patient_ids[i]:
             continue
-
-        # FIX 5: compare in float minutes with small tolerance
         span_minutes = (
             (timestamps[i] - timestamps[i - seq_length + 1])
             / np.timedelta64(1, "m")
         )
         if abs(span_minutes - expected_minutes) > 0.01:
             continue
-
         Xs.append(X_scaled[i - seq_length + 1: i + 1])
         ys.append(y_series.iloc[i])
 
@@ -228,10 +188,6 @@ def create_3d_sequences(X_scaled, y_series, patient_ids, timestamps, seq_length)
 
 
 def build_seq_dataset(df_tr, df_te, features, target_col, seq_length):
-    """
-    Food is already interpolated upstream — dropna only removes rows
-    where the TARGET or non-food rolled features are genuinely missing.
-    """
     train_clean = df_tr.dropna(subset=[target_col] + features).reset_index(drop=True)
     test_clean  = df_te.dropna(subset=[target_col] + features).reset_index(drop=True)
 
@@ -253,18 +209,6 @@ def build_seq_dataset(df_tr, df_te, features, target_col, seq_length):
         "X_test":  X_test_3d,  "y_test":  y_test,
         "n_train": len(train_clean), "n_test": len(test_clean),
     }
-
-
-# ============================================================================
-# 5. CLINICAL SAMPLE WEIGHTING
-# ============================================================================
-def calculate_clinical_weights(y_true):
-    weights = np.ones(len(y_true), dtype=np.float32)
-    weights[y_true < 54]                      = 3.0
-    weights[(y_true >= 54) & (y_true < 70)]   = 2.5
-    weights[(y_true > 180) & (y_true <= 250)] = 1.5
-    weights[y_true > 250]                      = 2.0
-    return weights
 
 
 # ============================================================================
@@ -302,9 +246,9 @@ class GlucoseCNNLSTM(nn.Module):
 
 
 # ============================================================================
-# 7. TRAINING LOOP
+# 7. TRAINING LOOP — clinically weighted MSE
 # ============================================================================
-def train_weighted_cnn_lstm(
+def train_cnn_lstm(
     x_train, y_train, sample_weights, input_dim, lr,
     epochs=MAX_EPOCHS, patience=PATIENCE, val_ratio=VAL_RATIO,
     **model_kwargs,
@@ -324,7 +268,9 @@ def train_weighted_cnn_lstm(
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     train_loader = DataLoader(
-        GlucoseDataset(xt, yt, wt), batch_size=BATCH_SIZE, shuffle=SHUFFLE
+        GlucoseDataset(xt, yt, wt),
+        batch_size=BATCH_SIZE,
+        shuffle=SHUFFLE,
     )
 
     best_val_loss    = float("inf")
@@ -336,22 +282,19 @@ def train_weighted_cnn_lstm(
         model.train()
         for xb, yb, wb in train_loader:
             optimizer.zero_grad()
-            preds = model(xb)
-            loss  = (criterion(preds, yb) * wb).mean()
+            loss = (criterion(model(xb), yb) * wb).mean()
             loss.backward()
             optimizer.step()
 
         model.eval()
         with torch.no_grad():
-            val_preds = model(xv)
-            val_loss  = (criterion(val_preds, yv) * wv).mean().item()
+            val_loss = (criterion(model(xv), yv) * wv).mean().item()
 
         epochs_trained = epoch + 1
 
         if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            # FIX 6: deep copy — clone each tensor so saved weights are independent
-            best_weights  = {k: v.clone() for k, v in model.state_dict().items()}
+            best_val_loss    = val_loss
+            best_weights     = {k: v.clone() for k, v in model.state_dict().items()}
             patience_counter = 0
         else:
             patience_counter += 1
@@ -372,7 +315,7 @@ def grid_search_dl(x_train, y_train, sample_weights, input_dim, param_grid):
     best_score, best_params = float("inf"), {}
     for combo in combos:
         params = dict(zip(keys, combo))
-        _, val_loss, _ = train_weighted_cnn_lstm(
+        _, val_loss, _ = train_cnn_lstm(
             x_train, y_train, sample_weights, input_dim=input_dim,
             epochs=GRID_SEARCH_EPOCHS, patience=GRID_SEARCH_PATIENCE,
             hidden_dim=params["hidden_dim"], lr=params["lr"],
@@ -397,84 +340,15 @@ def metrics_dict(y_true, y_pred):
 
 
 # ============================================================================
-# 10. LOPO (Leave-One-Patient-Out)
-# ============================================================================
-def run_lopo_dl(df_w, features, target_col, seq_length, best_params,
-                patient_col="Patient_ID"):
-    """
-    FIX 7: food is already interpolated in df_w — dropna only on target
-    and non-food features, exactly matching build_seq_dataset behaviour.
-    """
-    patients     = df_w[patient_col].unique()
-    lopo_results = []
-    pooled_true, pooled_pred = [], []
-
-    for test_pid in patients:
-        train_df = (df_w[df_w[patient_col] != test_pid]
-                       .dropna(subset=[target_col] + features)
-                       .reset_index(drop=True))
-        test_df  = (df_w[df_w[patient_col] == test_pid]
-                       .dropna(subset=[target_col] + features)
-                       .reset_index(drop=True))
-
-        if len(train_df) < LOPO_MIN_TRAIN_ROWS or len(test_df) < LOPO_MIN_TEST_ROWS:
-            continue
-
-        scaler     = StandardScaler().fit(train_df[features])
-        X_train_2d = scaler.transform(train_df[features])
-        X_test_2d  = scaler.transform(test_df[features])
-
-        X_train_3d, y_train = create_3d_sequences(
-            X_train_2d,
-            train_df[target_col].reset_index(drop=True),
-            train_df[patient_col].reset_index(drop=True),
-            train_df["Timestamp"].reset_index(drop=True),
-            seq_length,
-        )
-        X_test_3d, y_test = create_3d_sequences(
-            X_test_2d,
-            test_df[target_col].reset_index(drop=True),
-            test_df[patient_col].reset_index(drop=True),
-            test_df["Timestamp"].reset_index(drop=True),
-            seq_length,
-        )
-
-        if len(X_train_3d) < 10 or len(X_test_3d) < 5:
-            continue
-
-        weights = calculate_clinical_weights(y_train)
-        model, _, epochs_trained = train_weighted_cnn_lstm(
-            X_train_3d, y_train, weights, input_dim=len(features),
-            hidden_dim=best_params["hidden_dim"], lr=best_params["lr"],
-        )
-        model.eval()
-        with torch.no_grad():
-            preds = model(torch.tensor(X_test_3d)).numpy().flatten()
-
-        m = metrics_dict(y_test, preds)
-        m.update({
-            "patient":        test_pid,
-            "n_train":        len(X_train_3d),
-            "n_test":         len(X_test_3d),
-            "epochs_trained": epochs_trained,
-        })
-        lopo_results.append(m)
-        pooled_true.append(y_test)
-        pooled_pred.append(preds)
-
-    return lopo_results, pooled_true, pooled_pred
-
-
-# ============================================================================
-# 11. CLARKE ERROR GRID
+# 10. CLARKE ERROR GRID
 # ============================================================================
 def clarke_grid_pooled(pooled_predictions, model_name, out_dir, n_splits):
     for (window_label, subset, horizon), bucket in pooled_predictions.items():
         y_true = np.concatenate(bucket["y_true"])
         y_pred = np.concatenate(bucket["y_pred"])
 
-        print(f"--- {window_label} {horizon.upper()} {model_name} {subset.upper()} "
-              f"ZONES (pooled, {n_splits} folds) ---")
+        print(f"--- {window_label} {horizon.upper()} {model_name} "
+              f"{subset.upper()} ZONES (pooled, {n_splits} folds) ---")
         zones = ceg.zone(y_true, y_pred)
         print(zones)
 
@@ -484,12 +358,13 @@ def clarke_grid_pooled(pooled_predictions, model_name, out_dir, n_splits):
                         f"{window_label} {horizon.upper()} (pooled)")
         )
         fig.write_html(
-            str(out_dir / f"clarke_{model_name}_{subset}_{window_label}_{horizon}_pooled.html")
+            str(out_dir / f"clarke_{model_name}_{subset}_{window_label}"
+                          f"_{horizon}_pooled.html")
         )
 
 
 # ============================================================================
-# 12. ABLATION BAR PLOT
+# 11. ABLATION BAR PLOT
 # ============================================================================
 def create_bar_plot(ablation_results, title, save_path):
     df_results = pd.DataFrame(ablation_results).T
@@ -534,11 +409,11 @@ def create_bar_plot(ablation_results, title, save_path):
 grid_cache_path = RESULTS_DIR / f"grid_search_{MODEL_NAME}.json"
 grid_cache = json.load(open(grid_cache_path)) if grid_cache_path.exists() else {}
 
-all_results, all_ablation_results, all_lopo_results = [], [], []
-pooled_predictions, pooled_lopo_predictions = {}, {}
+all_results, all_ablation_results = [], []
+pooled_predictions = {}
 
 # ============================================================================
-# 13. WINDOW SIZE LOOP
+# 12. WINDOW SIZE LOOP
 # ============================================================================
 for window_label, window_size in WINDOW_SIZES.items():
     print(f"\n{'#'*70}\nWINDOW SIZE: {window_label} ({window_size} steps)\n{'#'*70}")
@@ -546,33 +421,47 @@ for window_label, window_size in WINDOW_SIZES.items():
     df_w       = df.copy()
     SEQ_LENGTH = window_size
 
-    # Set Timestamp as index once for all time-based rolling ops
+    # per-patient row-count check
+    min_rows_needed   = SEQ_LENGTH + N_SPLITS + 1
+    excluded_patients = []
+    for pid, grp in df_w.groupby("Patient_ID"):
+        if len(grp) < min_rows_needed:
+            excluded_patients.append((pid, len(grp)))
+    if excluded_patients:
+        print(f"  ⚠ [{window_label}] {len(excluded_patients)} patient(s) below "
+              f"{min_rows_needed} rows:")
+        for pid, n in excluded_patients:
+            print(f"      Patient {pid}: {n} rows")
+    else:
+        print(f"  ✓ [{window_label}] All patients have ≥ {min_rows_needed} rows.")
+
     temp_time_df = df_w.set_index("Timestamp")
 
     # -------------------------------------------------------------------------
-    # PHYSIOLOGICAL VARIABILITY — Time-Based Rolling
-    # FIX 2: reset_index(level=0) keeps Timestamp alignment after groupby+rolling
+    # PHYSIOLOGICAL VARIABILITY — merge-based alignment (fixes duplicate index)
     # -------------------------------------------------------------------------
     print(f"\n[3/10] PHYSIOLOGICAL VARIABILITY anchored to {window_label}...")
-    physio_features_all                              = []
-    physio_hr = physio_eda = physio_bvp = physio_ibi = physio_skin = []
+    physio_features_all                                   = []
     physio_hr, physio_eda, physio_bvp, physio_ibi, physio_skin = [], [], [], [], []
 
     def _add_std_anchored(col_src: str, target_list: list) -> None:
         if col_src not in df_w.columns:
             return
         col = f"{col_src.lower()}_std_{window_label}"
-        # FIX 2: reset_index(level=0) drops Patient_ID level, keeps Timestamp
-        # then reindex back onto df_w's Timestamp for guaranteed row alignment
+
         rolled = (
             temp_time_df
             .groupby("Patient_ID")[col_src]
             .rolling(window_label)
             .std()
-            .reset_index(level=0, drop=True)
-            .sort_index()
+            .reset_index()
+            .rename(columns={col_src: col})
         )
-        df_w[col] = rolled.reindex(df_w["Timestamp"]).values
+        df_w[col] = (
+            df_w[["Patient_ID", "Timestamp"]]
+            .merge(rolled, on=["Patient_ID", "Timestamp"], how="left")[col]
+            .values
+        )
         physio_features_all.append(col)
         target_list.append(col)
 
@@ -583,8 +472,7 @@ for window_label, window_size in WINDOW_SIZES.items():
     _add_std_anchored("Skin_Temp",  physio_skin)
 
     # -------------------------------------------------------------------------
-    # ACTIVITY — Time-Based Rolling
-    # FIX 3: same reset_index fix applied here
+    # ACTIVITY — merge-based alignment (same fix)
     # -------------------------------------------------------------------------
     print(f"\n[4/10] ACTIVITY FEATURES anchored to {window_label}...")
     activity_features = []
@@ -598,25 +486,24 @@ for window_label, window_size in WINDOW_SIZES.items():
                 .groupby("Patient_ID")["Acc_Vmu"]
                 .rolling(window_label)
                 .agg(agg_fn)
-                .reset_index(level=0, drop=True)
-                .sort_index()
+                .reset_index()
+                .rename(columns={"Acc_Vmu": col})
             )
-            df_w[col] = rolled.reindex(df_w["Timestamp"]).values
-
+            df_w[col] = (
+                df_w[["Patient_ID", "Timestamp"]]
+                .merge(rolled, on=["Patient_ID", "Timestamp"], how="left")[col]
+                .values
+            )
         activity_features = [col_mean, col_max]
-
     # -------------------------------------------------------------------------
-    # Build glucose lookup dict — used for lag + targets
-    # FIX 4: dict-based lookup replaces broken MultiIndex.map(Series) pattern
+    # GLUCOSE LOOKUP
     # -------------------------------------------------------------------------
     glucose_lookup: dict = (
-        df_w.set_index(["Patient_ID", "Timestamp"])["Glucose"]
-            .to_dict()
+        df_w.set_index(["Patient_ID", "Timestamp"])["Glucose"].to_dict()
     )
 
     # -------------------------------------------------------------------------
-    # GLUCOSE LAG — Exact Timestamp Shift
-    # FIX 4: explicit dict .get() instead of MultiIndex.map()
+    # GLUCOSE LAG (ablation only)
     # -------------------------------------------------------------------------
     print(f"\n[5/10] GLUCOSE LAG (ablation-only) anchored to {window_label}...")
     lag_col = f"glucose_lag_{window_label}"
@@ -631,22 +518,21 @@ for window_label, window_size in WINDOW_SIZES.items():
     lag_features  = [lag_col, roc_col]
 
     # -------------------------------------------------------------------------
-    # TARGET EXTRACTION — Exact Timestamp Shift
-    # FIX 4: same dict .get() pattern
+    # TARGET EXTRACTION
     # -------------------------------------------------------------------------
     for h_label in HORIZONS:
-        td            = pd.Timedelta(h_label.replace("min", "m"))
-        future_times  = df_w["Timestamp"] + td
+        td = pd.Timedelta(h_label.replace("min", "m"))
+        future_times = df_w["Timestamp"] + td
         df_w[f"Target_{h_label}"] = [
             glucose_lookup.get((pid, ts), np.nan)
             for pid, ts in zip(df_w["Patient_ID"], future_times)
         ]
 
     # -------------------------------------------------------------------------
-    # FEATURE SETS
+    # FEATURE SETS — FIX 5/6: sensor_cols restored
     # -------------------------------------------------------------------------
     all_features = (
-        ["Glucose"] + temporal_features 
+        ["Glucose"] + temporal_features
         + food_features_all + activity_features + physio_features_all
     )
     all_features = [f for f in all_features if f in df_w.columns]
@@ -694,19 +580,24 @@ for window_label, window_size in WINDOW_SIZES.items():
         print(f"  Fold {i}: train={len(tr):,}  test={len(te):,}")
 
     # -------------------------------------------------------------------------
-    # GRID SEARCH
+    # GRID SEARCH — FIX 2: gs_weights passed to grid_search_dl
     # -------------------------------------------------------------------------
-    print(f"\n[7/10] GRID SEARCH ({window_label})...")
+    print(f"\n[7/10] GRID SEARCH ({window_label}, 30-min horizon only)...")
     gs_key = f"{MODEL_NAME}_{window_label}"
     if gs_key in grid_cache:
         best_params = grid_cache[gs_key]
         print(f"  Loaded cached params: {best_params}")
     else:
-        gs_seq     = build_seq_dataset(
+        gs_seq = build_seq_dataset(
             df_train_final, df_test_final,
             all_features, "Target_30min", SEQ_LENGTH,
         )
-        gs_weights = calculate_clinical_weights(gs_seq["y_train"])
+        if len(gs_seq["X_train"]) == 0:
+            print(f"  ⚠ No sequences for grid search at {window_label} — skipping")
+            continue
+
+        # FIX 2: compute weights and pass them
+        gs_weights  = calculate_clinical_weights(gs_seq["y_train"])
         best_params, best_score = grid_search_dl(
             gs_seq["X_train"], gs_seq["y_train"], gs_weights,
             input_dim=len(all_features), param_grid=DL_PARAM_GRID,
@@ -717,17 +608,24 @@ for window_label, window_size in WINDOW_SIZES.items():
         print(f"  Best params: {best_params}  (val_loss={best_score:.4f})")
 
     # -------------------------------------------------------------------------
-    # MAIN TRAINING LOOP
+    # MAIN TRAINING LOOP — FIX 3: weights computed and passed at every call
     # -------------------------------------------------------------------------
     print(f"\n[8/10] MAIN TRAINING LOOP ({window_label})...")
     for fold_i, (df_tr, df_te) in enumerate(wf_folds):
         for subset, features in FEATURE_SETS.items():
             for h_label in HORIZONS:
                 target_col = f"Target_{h_label}"
-                seq        = build_seq_dataset(df_tr, df_te, features, target_col, SEQ_LENGTH)
-                weights    = calculate_clinical_weights(seq["y_train"])
+                seq        = build_seq_dataset(df_tr, df_te, features,
+                                               target_col, SEQ_LENGTH)
 
-                model, val_loss, epochs_trained = train_weighted_cnn_lstm(
+                if len(seq["X_train"]) == 0 or len(seq["X_test"]) == 0:
+                    print(f"  [fold {fold_i}] {subset} {h_label} — "
+                          f"no sequences, skipping")
+                    continue
+
+                # FIX 3: compute and pass weights
+                weights = calculate_clinical_weights(seq["y_train"])
+                model, val_loss, epochs_trained = train_cnn_lstm(
                     seq["X_train"], seq["y_train"], weights,
                     input_dim=len(features),
                     hidden_dim=best_params["hidden_dim"],
@@ -754,7 +652,7 @@ for window_label, window_size in WINDOW_SIZES.items():
                       f"epochs={epochs_trained}")
 
     # -------------------------------------------------------------------------
-    # ABLATION STUDY
+    # ABLATION STUDY — FIX 4: weights computed and passed at every call
     # -------------------------------------------------------------------------
     print(f"\n[9/10] ABLATION STUDY ({window_label})...")
     for combo_name, combo_features in feature_groups.items():
@@ -766,9 +664,13 @@ for window_label, window_size in WINDOW_SIZES.items():
                 df_train_final, df_test_final,
                 combo_features, target_col, SEQ_LENGTH,
             )
-            weights = calculate_clinical_weights(seq["y_train"])
 
-            model, _, _ = train_weighted_cnn_lstm(
+            if len(seq["X_train"]) == 0 or len(seq["X_test"]) == 0:
+                continue
+
+            # FIX 4: compute and pass weights
+            weights = calculate_clinical_weights(seq["y_train"])
+            model, _, _ = train_cnn_lstm(
                 seq["X_train"], seq["y_train"], weights,
                 input_dim=len(combo_features),
                 hidden_dim=best_params["hidden_dim"],
@@ -785,61 +687,28 @@ for window_label, window_size in WINDOW_SIZES.items():
                 "n_train": seq["n_train"], "n_test": seq["n_test"],
             })
 
+        window_rows = [x for x in all_ablation_results
+                       if x["combo"] == combo_name and x["window"] == window_label]
         print(f"  [{combo_name:20s}] " + ", ".join(
-            f"{h}={r['rmse']:.2f}" for h, r in zip(
-                HORIZONS,
-                [x for x in all_ablation_results
-                 if x["combo"] == combo_name and x["window"] == window_label],
-            )
+            f"{h}={r['rmse']:.2f}" for h, r in zip(HORIZONS, window_rows)
         ))
 
-    # -------------------------------------------------------------------------
-    # LOPO
-    # -------------------------------------------------------------------------
-    print(f"\n[LOPO] LEAVE-ONE-PATIENT-OUT ({window_label})...")
-    for subset, features in FEATURE_SETS.items():
-        for h_label in HORIZONS:
-            target_col   = f"Target_{h_label}"
-            lopo_results, pooled_true, pooled_pred = run_lopo_dl(
-                df_w, features, target_col, SEQ_LENGTH, best_params,
-            )
-            for r in lopo_results:
-                r.update({
-                    "model": MODEL_NAME, "window": window_label,
-                    "subset": subset,    "horizon": h_label,
-                })
-            all_lopo_results.extend(lopo_results)
-
-            if pooled_true:
-                key = (window_label, subset, h_label)
-                pooled_lopo_predictions.setdefault(key, {"y_true": [], "y_pred": []})
-                pooled_lopo_predictions[key]["y_true"].extend(pooled_true)
-                pooled_lopo_predictions[key]["y_pred"].extend(pooled_pred)
-
-            n_used    = len(lopo_results)
-            mean_rmse = (np.mean([r["rmse"] for r in lopo_results])
-                         if lopo_results else float("nan"))
-            print(f"  [{subset:10s}] {h_label:6s} LOPO RMSE "
-                  f"(mean over {n_used} patients) = {mean_rmse:.2f}")
-
 
 # ============================================================================
-# 14. SAVE RESULTS
+# 13. SAVE RESULTS
 # ============================================================================
 print(f"\n[SAVE] SAVING RESULTS...")
+
 results_df = pd.DataFrame(all_results)
 results_df.to_csv(RESULTS_DIR / f"results_{MODEL_NAME}.csv", index=False)
 
 ablation_df = pd.DataFrame(all_ablation_results)
 ablation_df.to_csv(RESULTS_DIR / f"results_{MODEL_NAME}_ablation.csv", index=False)
 
-lopo_df = pd.DataFrame(all_lopo_results)
-lopo_df.to_csv(RESULTS_DIR / f"results_{MODEL_NAME}_lopo.csv", index=False)
-
 with open(RESULTS_DIR / f"results_{MODEL_NAME}_pooled_preds.pkl", "wb") as f:
     pickle.dump(pooled_predictions, f)
 
-print(f"  Saved results_{MODEL_NAME}.csv, ablation, lopo, pooled_preds")
+print(f"  Saved results, ablation, pooled_preds for {MODEL_NAME}")
 
 summary = (
     results_df
@@ -855,62 +724,21 @@ summary = (
 )
 summary.to_csv(RESULTS_DIR / f"summary_{MODEL_NAME}.csv", index=False)
 
-print(f"\n{'='*70}\nWALK-FORWARD SUMMARY (mean +/- std over {N_SPLITS} folds)\n{'='*70}")
+print(f"\n{'='*70}\nWALK-FORWARD SUMMARY (mean ± std over {N_SPLITS} folds)\n{'='*70}")
 for window_label in WINDOW_SIZES:
     print(f"\n  Window: {window_label}")
     for _, r in summary[summary["window"] == window_label].iterrows():
         print(f"    [{r['subset']:10s}] {r['horizon']:6s}  "
-              f"RMSE={r['rmse_mean']:.2f}+/-{r['rmse_std']:.2f}  "
-              f"MAE={r['mae_mean']:.2f}+/-{r['mae_std']:.2f}  "
+              f"RMSE={r['rmse_mean']:.2f}±{r['rmse_std']:.2f}  "
+              f"MAE={r['mae_mean']:.2f}±{r['mae_std']:.2f}  "
               f"R2={r['r2_mean']:.4f}  MAPE={r['mape_mean']:.2f}%  "
               f"epochs~{r['epochs_mean']:.0f}")
 
-lopo_summary = (
-    lopo_df
-    .groupby(["window", "subset", "horizon"])
-    .agg(
-        rmse_mean=("rmse", "mean"), rmse_std=("rmse", "std"),
-        mae_mean=("mae", "mean"),   mae_std=("mae", "std"),
-        epochs_mean=("epochs_trained", "mean"),
-        n_patients=("rmse", "count"),
-    )
-    .reset_index()
-)
-lopo_summary.to_csv(RESULTS_DIR / f"summary_{MODEL_NAME}_lopo.csv", index=False)
-
-print(f"\n{'='*70}\nLOPO SUMMARY\n{'='*70}")
-for window_label in WINDOW_SIZES:
-    print(f"\n  Window: {window_label}")
-    for _, r in lopo_summary[lopo_summary["window"] == window_label].iterrows():
-        print(f"    [{r['subset']:10s}] {r['horizon']:6s}  "
-              f"RMSE={r['rmse_mean']:.2f}+/-{r['rmse_std']:.2f}  "
-              f"MAE={r['mae_mean']:.2f}+/-{r['mae_std']:.2f}  "
-              f"epochs~{r['epochs_mean']:.0f}  n={r['n_patients']:.0f}")
-
-print(f"\n{'='*70}\nPERSONALISED vs. LOPO\n{'='*70}")
-for window_label in WINDOW_SIZES:
-    for subset in FEATURE_SETS:
-        for h_label in HORIZONS:
-            pr  = summary[(summary["window"]  == window_label) &
-                          (summary["subset"]  == subset) &
-                          (summary["horizon"] == h_label)]
-            lr_ = lopo_summary[(lopo_summary["window"]  == window_label) &
-                                (lopo_summary["subset"]  == subset) &
-                                (lopo_summary["horizon"] == h_label)]
-            if pr.empty or lr_.empty:
-                continue
-            pers_rmse = pr["rmse_mean"].values[0]
-            lopo_rmse = lr_["rmse_mean"].values[0]
-            print(f"  [{window_label}][{subset:10s}][{h_label:6s}]  "
-                  f"Personalised={pers_rmse:.2f}  LOPO={lopo_rmse:.2f}  "
-                  f"Diff={lopo_rmse - pers_rmse:+.2f} mg/dL")
-
 # ============================================================================
-# 15. CLARKE ERROR GRID + ABLATION PLOTS
+# 14. CLARKE ERROR GRID + ABLATION PLOTS
 # ============================================================================
 print(f"\n[PLOTS] CLARKE ERROR GRID + ABLATION PLOTS...")
-clarke_grid_pooled(pooled_predictions,      MODEL_NAME,           RESULTS_DIR, N_SPLITS)
-clarke_grid_pooled(pooled_lopo_predictions, f"{MODEL_NAME}_lopo", RESULTS_DIR, n_splits=1)
+clarke_grid_pooled(pooled_predictions, MODEL_NAME, RESULTS_DIR, N_SPLITS)
 
 for window_label in WINDOW_SIZES:
     sub = ablation_df[ablation_df["window"] == window_label]
@@ -923,4 +751,4 @@ for window_label in WINDOW_SIZES:
         RESULTS_DIR / f"ablation_{MODEL_NAME}_{window_label}.png",
     )
 
-print("\nCNN-LSTM pipeline complete (walk-forward + ablation + LOPO).")
+print("\nCNN-LSTM pipeline complete (walk-forward + ablation).")
