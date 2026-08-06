@@ -5,12 +5,13 @@ Aligned to FINAL_EXPERIMENTS_PLAN.md:
 
 - Clinically-weighted MSELoss (hypo/hyper sample weights)
 - Grid: hidden_dim [32,64,128] x lr [1e-3, 5e-4] (§2.8, §8A.5)
-- Window sizes: 1h/2h/3h/6h (12/24/36/72 steps) — grid sweep (§2.6, §8A.6)
-- Per-patient row-count check before large windows (§8A.6)
+- Window sizes: 1h/2h/3h/6h (12/24/36/72 steps) — grid sweep
+- Per-patient row-count check before large windows
 - LOPO removed (§10 item 3)
 - Food columns: exact plain names, linear interpolation (§0A)
 - max_epochs=150, patience=15, batch_size=32, shuffle=False,
-  val_ratio=0.20, seed=42 (§1)
+  val_ratio=0.20, seed=42
+- CNN-LSTM: Conv1d → ReLU → LSTM → Linear
 """
 import glob
 import os
@@ -69,7 +70,7 @@ FOOD_COLS = ["calorie", "total_carb", "dietary_fiber", "sugar", "protein", "tota
 print(f"\n{'='*70}\nCNN-LSTM — WINDOW x HORIZON WALK-FORWARD PIPELINE\n{'='*70}")
 
 # ============================================================================
-# 1. LOAD DATA
+# 1. LOAD DATA - FIXED for \N values and Patient_ID preservation
 # ============================================================================
 print("\n[1/10] LOADING DATA...")
 
@@ -79,11 +80,37 @@ if not file_list:
 if not file_list:
     raise ValueError("No parquet files found!")
 
-df = pd.concat([pd.read_parquet(f) for f in file_list], ignore_index=True)
+dfs = []
+for file_path in file_list:
+    temp_df = pd.read_parquet(file_path)
+    
+    # Ensure Patient_ID stays as string (your data has "001", "002", etc.)
+    if "Patient_ID" in temp_df.columns:
+        temp_df["Patient_ID"] = temp_df["Patient_ID"].astype(str).str.zfill(3)
+    
+    # CRITICAL: Handle \N in food columns - convert to actual NaN
+    for col in FOOD_COLS:
+        if col in temp_df.columns:
+            temp_df[col] = temp_df[col].replace('\\N', np.nan)
+            temp_df[col] = pd.to_numeric(temp_df[col], errors='coerce')
+    
+    print(f"  Loaded: {os.path.basename(file_path)} -> {len(temp_df):,} rows, Patient: {temp_df['Patient_ID'].iloc[0]}")
+    dfs.append(temp_df)
+
+df = pd.concat(dfs, ignore_index=True)
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df = df.sort_values(["Patient_ID", "Timestamp"]).reset_index(drop=True)
 
-print(f"Loaded: {len(df):,} rows from {df['Patient_ID'].nunique()} patients")
+# Validate Patient_ID loading
+print(f"\n DATA VALIDATION:")
+print(f"  Total rows: {len(df):,}")
+print(f"  Unique patients: {df['Patient_ID'].nunique()}")
+print(f"  Patient IDs: {sorted(df['Patient_ID'].unique())}")
+
+if df['Patient_ID'].nunique() < 2:
+    raise ValueError(f" CRITICAL: Only {df['Patient_ID'].nunique()} unique patient(s)!")
+
+print(f" Successfully loaded {len(df):,} rows from {df['Patient_ID'].nunique()} patients")
 
 # ============================================================================
 # 2. BASE FEATURE ENGINEERING
@@ -99,20 +126,24 @@ df["Hour_cos"]        = np.cos(2 * np.pi * df["Hour"] / 24)
 temporal_features = ["Hour", "Minute", "DayOfWeek", "MinFromMidnight",
                      "Hour_sin", "Hour_cos"]
 
-# FIX 5/6: sensor_cols defined here and kept in feature lists
+# Sensor columns for physiological variability computation only
+# (raw values not included in main features - redundant with rolling std)
 sensor_cols = [c for c in ["Heart_Rate", "Acc_Vmu", "EDA", "Skin_Temp", "BVP", "IBI"]
                if c in df.columns]
 
+# Interpolate sensors for rolling std calculation (limit=6 steps = 30 min)
 for col in sensor_cols:
     df[col] = (
         df.groupby("Patient_ID")[col]
           .transform(lambda x: x.interpolate(method="linear", limit=6))
     )
-print(f"  Sensors interpolated (limit=6 / 30 min): {sensor_cols}")
+print(f"  Sensors interpolated for physio features: {sensor_cols}")
 
+# Food columns - exact plain names
 food_features_all   = [c for c in df.columns if c in FOOD_COLS]
 food_features_carbs = [c for c in df.columns if c == "total_carb"]
 
+# Linear interpolation for food (no limit)
 for col in food_features_all:
     df[col] = (
         df.groupby("Patient_ID")[col]
@@ -159,7 +190,7 @@ def calculate_clinical_weights(y_true):
     weights[y_true < 54]                      = 3.0
     weights[(y_true >= 54) & (y_true < 70)]   = 2.5
     weights[(y_true > 180) & (y_true <= 250)] = 1.5
-    weights[y_true > 250]                      = 2.0
+    weights[y_true > 250]                     = 2.0
     return weights
 
 
@@ -428,17 +459,17 @@ for window_label, window_size in WINDOW_SIZES.items():
         if len(grp) < min_rows_needed:
             excluded_patients.append((pid, len(grp)))
     if excluded_patients:
-        print(f"  ⚠ [{window_label}] {len(excluded_patients)} patient(s) below "
+        print(f"  [{window_label}] {len(excluded_patients)} patient(s) below "
               f"{min_rows_needed} rows:")
         for pid, n in excluded_patients:
             print(f"      Patient {pid}: {n} rows")
     else:
-        print(f"  ✓ [{window_label}] All patients have ≥ {min_rows_needed} rows.")
+        print(f"  [{window_label}] All patients have ≥ {min_rows_needed} rows.")
 
     temp_time_df = df_w.set_index("Timestamp")
 
     # -------------------------------------------------------------------------
-    # PHYSIOLOGICAL VARIABILITY — merge-based alignment (fixes duplicate index)
+    # PHYSIOLOGICAL VARIABILITY — merge-based alignment
     # -------------------------------------------------------------------------
     print(f"\n[3/10] PHYSIOLOGICAL VARIABILITY anchored to {window_label}...")
     physio_features_all                                   = []
@@ -472,7 +503,7 @@ for window_label, window_size in WINDOW_SIZES.items():
     _add_std_anchored("Skin_Temp",  physio_skin)
 
     # -------------------------------------------------------------------------
-    # ACTIVITY — merge-based alignment (same fix)
+    # ACTIVITY — merge-based alignment
     # -------------------------------------------------------------------------
     print(f"\n[4/10] ACTIVITY FEATURES anchored to {window_label}...")
     activity_features = []
@@ -495,6 +526,7 @@ for window_label, window_size in WINDOW_SIZES.items():
                 .values
             )
         activity_features = [col_mean, col_max]
+
     # -------------------------------------------------------------------------
     # GLUCOSE LOOKUP
     # -------------------------------------------------------------------------
@@ -529,7 +561,7 @@ for window_label, window_size in WINDOW_SIZES.items():
         ]
 
     # -------------------------------------------------------------------------
-    # FEATURE SETS — FIX 5/6: sensor_cols restored
+    # FEATURE SETS - NO RAW SENSOR VALUES (redundant with physio variability)
     # -------------------------------------------------------------------------
     all_features = (
         ["Glucose"] + temporal_features
@@ -580,7 +612,7 @@ for window_label, window_size in WINDOW_SIZES.items():
         print(f"  Fold {i}: train={len(tr):,}  test={len(te):,}")
 
     # -------------------------------------------------------------------------
-    # GRID SEARCH — FIX 2: gs_weights passed to grid_search_dl
+    # GRID SEARCH
     # -------------------------------------------------------------------------
     print(f"\n[7/10] GRID SEARCH ({window_label}, 30-min horizon only)...")
     gs_key = f"{MODEL_NAME}_{window_label}"
@@ -593,10 +625,9 @@ for window_label, window_size in WINDOW_SIZES.items():
             all_features, "Target_30min", SEQ_LENGTH,
         )
         if len(gs_seq["X_train"]) == 0:
-            print(f"  ⚠ No sequences for grid search at {window_label} — skipping")
+            print(f"  No sequences for grid search at {window_label} — skipping")
             continue
 
-        # FIX 2: compute weights and pass them
         gs_weights  = calculate_clinical_weights(gs_seq["y_train"])
         best_params, best_score = grid_search_dl(
             gs_seq["X_train"], gs_seq["y_train"], gs_weights,
@@ -608,7 +639,7 @@ for window_label, window_size in WINDOW_SIZES.items():
         print(f"  Best params: {best_params}  (val_loss={best_score:.4f})")
 
     # -------------------------------------------------------------------------
-    # MAIN TRAINING LOOP — FIX 3: weights computed and passed at every call
+    # MAIN TRAINING LOOP
     # -------------------------------------------------------------------------
     print(f"\n[8/10] MAIN TRAINING LOOP ({window_label})...")
     for fold_i, (df_tr, df_te) in enumerate(wf_folds):
@@ -623,7 +654,6 @@ for window_label, window_size in WINDOW_SIZES.items():
                           f"no sequences, skipping")
                     continue
 
-                # FIX 3: compute and pass weights
                 weights = calculate_clinical_weights(seq["y_train"])
                 model, val_loss, epochs_trained = train_cnn_lstm(
                     seq["X_train"], seq["y_train"], weights,
@@ -652,7 +682,7 @@ for window_label, window_size in WINDOW_SIZES.items():
                       f"epochs={epochs_trained}")
 
     # -------------------------------------------------------------------------
-    # ABLATION STUDY — FIX 4: weights computed and passed at every call
+    # ABLATION STUDY
     # -------------------------------------------------------------------------
     print(f"\n[9/10] ABLATION STUDY ({window_label})...")
     for combo_name, combo_features in feature_groups.items():
@@ -668,7 +698,6 @@ for window_label, window_size in WINDOW_SIZES.items():
             if len(seq["X_train"]) == 0 or len(seq["X_test"]) == 0:
                 continue
 
-            # FIX 4: compute and pass weights
             weights = calculate_clinical_weights(seq["y_train"])
             model, _, _ = train_cnn_lstm(
                 seq["X_train"], seq["y_train"], weights,

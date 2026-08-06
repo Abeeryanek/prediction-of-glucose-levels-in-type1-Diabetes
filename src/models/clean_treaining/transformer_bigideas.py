@@ -1,34 +1,18 @@
 """
 transformer.py — Transformer Encoder, Window Size x Horizon Walk-Forward Pipeline
 =====================================================================================
-Aligned to FINAL_EXPERIMENTS_PLAN.md and identical structure to cnn_lstm.py /
-autoencoder.py — only the model architecture differs.
-
-Architecture (Vaswani et al. 2017):
-  1. Input projection   nn.Linear(n_features, d_model)
-  2. Positional encoding (sinusoidal)
-  3. nn.TransformerEncoder (batch_first=True, num_layers stacked layers)
-  4. Last-timestep readout  out[:, -1, :]
-  5. Prediction head     nn.Linear(d_model, 1)
+Aligned to FINAL_EXPERIMENTS_PLAN.md:
 
 - Clinically-weighted MSELoss (hypo/hyper sample weights)
-- Grid: d_model [32,64,128] x lr [1e-3, 5e-4] (§2.5, §8A.5)
-- Window sizes: 1h/2h/3h/6h (12/24/36/72 steps) — grid sweep (§2.6, §8A.6)
-- Per-patient row-count check before large windows (§8A.6)
+- Grid: d_model [32,64,128] x lr [1e-3, 5e-4] (§2.5)
+- Window sizes: 1h/2h/3h/6h (12/24/36/72 steps) — grid sweep
+- Per-patient row-count check before large windows
 - LOPO removed (§10 item 3)
 - Food columns: exact plain names, linear interpolation (§0A)
-- Lag removed from main feature sets — lag is ablation-only (design point 1)
-- Glucose baseline included in all ablation groups except lag (design point 3)
-- Rolling features computed per-window via merge-based alignment (no reindex bug)
-- Strict time-based sequence validation (float-minute tolerance)
 - max_epochs=150, patience=15, batch_size=32, shuffle=False,
-  val_ratio=0.20, seed=42 (§1)
-
-References
-----------
-Vaswani et al. (2017) "Attention is All You Need"
-Xiong et al. (2025) — Transformer on OhioT1DM, RMSE 19.33 mg/dL
-Kalita & Mirza (2025) — multi-head attention on OhioT1DM, RMSE 16.57 mg/dL
+  val_ratio=0.20, seed=42
+- Transformer: d_model embedding, multi-head self-attention, positional encoding
+- Raw sensor values removed from feature sets (redundant with rolling std)
 """
 import glob
 import math
@@ -81,8 +65,7 @@ SHUFFLE    = False
 GRID_SEARCH_EPOCHS   = 30
 GRID_SEARCH_PATIENCE = 5
 
-# §2.5, §8A.5 — transformer grid: d_model x lr
-# nhead fixed at 4 — d_model values must all be divisible by 4
+# §2.5 — transformer grid: d_model x lr (nhead fixed at 4)
 DL_PARAM_GRID = {"d_model": [32, 64, 128], "lr": [1e-3, 5e-4]}
 
 FOOD_COLS = ["calorie", "total_carb", "dietary_fiber", "sugar", "protein", "total_fat"]
@@ -90,7 +73,7 @@ FOOD_COLS = ["calorie", "total_carb", "dietary_fiber", "sugar", "protein", "tota
 print(f"\n{'='*70}\nTRANSFORMER — WINDOW x HORIZON WALK-FORWARD PIPELINE\n{'='*70}")
 
 # ============================================================================
-# 1. LOAD DATA
+# 1. LOAD DATA - FIXED for \N values and Patient_ID preservation
 # ============================================================================
 print("\n[1/10] LOADING DATA...")
 
@@ -100,11 +83,37 @@ if not file_list:
 if not file_list:
     raise ValueError("No parquet files found!")
 
-df = pd.concat([pd.read_parquet(f) for f in file_list], ignore_index=True)
+dfs = []
+for file_path in file_list:
+    temp_df = pd.read_parquet(file_path)
+    
+    # Ensure Patient_ID stays as string (your data has "001", "002", etc.)
+    if "Patient_ID" in temp_df.columns:
+        temp_df["Patient_ID"] = temp_df["Patient_ID"].astype(str).str.zfill(3)
+    
+    # CRITICAL: Handle \N in food columns - convert to actual NaN
+    for col in FOOD_COLS:
+        if col in temp_df.columns:
+            temp_df[col] = temp_df[col].replace('\\N', np.nan)
+            temp_df[col] = pd.to_numeric(temp_df[col], errors='coerce')
+    
+    print(f"  Loaded: {os.path.basename(file_path)} -> {len(temp_df):,} rows, Patient: {temp_df['Patient_ID'].iloc[0]}")
+    dfs.append(temp_df)
+
+df = pd.concat(dfs, ignore_index=True)
 df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df = df.sort_values(["Patient_ID", "Timestamp"]).reset_index(drop=True)
 
-print(f"Loaded: {len(df):,} rows from {df['Patient_ID'].nunique()} patients")
+# Validate Patient_ID loading
+print(f"\n DATA VALIDATION:")
+print(f"  Total rows: {len(df):,}")
+print(f"  Unique patients: {df['Patient_ID'].nunique()}")
+print(f"  Patient IDs: {sorted(df['Patient_ID'].unique())}")
+
+if df['Patient_ID'].nunique() < 2:
+    raise ValueError(f" CRITICAL: Only {df['Patient_ID'].nunique()} unique patient(s)!")
+
+print(f" Successfully loaded {len(df):,} rows from {df['Patient_ID'].nunique()} patients")
 
 # ============================================================================
 # 2. BASE FEATURE ENGINEERING
@@ -120,23 +129,22 @@ df["Hour_cos"]        = np.cos(2 * np.pi * df["Hour"] / 24)
 temporal_features = ["Hour", "Minute", "DayOfWeek", "MinFromMidnight",
                      "Hour_sin", "Hour_cos"]
 
-# sensor_cols defined before use
+# Sensor columns for physiological variability computation only
+# (raw values not included in main features - redundant with rolling std)
 sensor_cols = [c for c in ["Heart_Rate", "Acc_Vmu", "EDA", "Skin_Temp", "BVP", "IBI"]
                if c in df.columns]
 
-# bounded linear interpolation for sensors, max gap 6 steps (30 min)
+# Interpolate sensors for rolling std calculation (limit=6 steps = 30 min)
 for col in sensor_cols:
     df[col] = (
         df.groupby("Patient_ID")[col]
           .transform(lambda x: x.interpolate(method="linear", limit=6))
     )
-print(f"  Sensors interpolated (limit=6 / 30 min): {sensor_cols}")
+print(f"  Sensors interpolated for physio features: {sensor_cols}")
 
-# food column detection — exact plain names, no trailing underscore
 food_features_all   = [c for c in df.columns if c in FOOD_COLS]
 food_features_carbs = [c for c in df.columns if c == "total_carb"]
 
-# plain linear interpolation for food, no limit
 for col in food_features_all:
     df[col] = (
         df.groupby("Patient_ID")[col]
@@ -183,7 +191,7 @@ def calculate_clinical_weights(y_true):
     weights[y_true < 54]                      = 3.0
     weights[(y_true >= 54) & (y_true < 70)]   = 2.5
     weights[(y_true > 180) & (y_true <= 250)] = 1.5
-    weights[y_true > 250]                      = 2.0
+    weights[y_true > 250]                     = 2.0
     return weights
 
 
@@ -191,11 +199,6 @@ def calculate_clinical_weights(y_true):
 # 5. 3D SEQUENCE BUILDER (Time-Locked)
 # ============================================================================
 def create_3d_sequences(X_scaled, y_series, patient_ids, timestamps, seq_length):
-    """
-    Builds (N, seq_length, n_features) arrays.
-    Skips sequences spanning patient boundaries or timestamp gaps.
-    Float-minute tolerance avoids ns vs minute precision mismatches.
-    """
     patient_ids      = np.asarray(patient_ids)
     timestamps       = np.asarray(timestamps, dtype="datetime64[ns]")
     expected_minutes = (seq_length - 1) * 5
@@ -217,10 +220,6 @@ def create_3d_sequences(X_scaled, y_series, patient_ids, timestamps, seq_length)
 
 
 def build_seq_dataset(df_tr, df_te, features, target_col, seq_length):
-    """
-    Food already interpolated upstream — dropna removes only rows where
-    target or rolling-derived features are genuinely unavailable.
-    """
     train_clean = df_tr.dropna(subset=[target_col] + features).reset_index(drop=True)
     test_clean  = df_te.dropna(subset=[target_col] + features).reset_index(drop=True)
 
@@ -245,7 +244,7 @@ def build_seq_dataset(df_tr, df_te, features, target_col, seq_length):
 
 
 # ============================================================================
-# 6. MODEL DEFINITION — Transformer Encoder (§2.5, Vaswani et al. 2017)
+# 6. MODEL DEFINITION — Transformer Encoder
 # ============================================================================
 class GlucoseDataset(Dataset):
     def __init__(self, x, y, weights):
@@ -261,11 +260,6 @@ class GlucoseDataset(Dataset):
 
 
 class _PositionalEncoding(nn.Module):
-    """
-    Sinusoidal positional encoding.
-    PE(pos, 2i)   = sin(pos / 10000^(2i/d_model))
-    PE(pos, 2i+1) = cos(pos / 10000^(2i/d_model))
-    """
     def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 512):
         super().__init__()
         self.dropout = nn.Dropout(p=dropout)
@@ -278,7 +272,7 @@ class _PositionalEncoding(nn.Module):
         )
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
-        self.register_buffer("pe", pe.unsqueeze(0))  # (1, max_len, d_model)
+        self.register_buffer("pe", pe.unsqueeze(0))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.pe[:, : x.size(1)]
@@ -286,22 +280,6 @@ class _PositionalEncoding(nn.Module):
 
 
 class GlucoseTransformer(nn.Module):
-    """
-    Transformer encoder: (batch, seq_len, n_features) → (batch, 1)
-
-    Every input timestep attends to every other timestep simultaneously via
-    multi-head self-attention, giving a global view of the window without the
-    sequential bottleneck of recurrent models (Vaswani et al. 2017).
-
-    Parameters
-    ----------
-    input_dim       : number of input features per timestep
-    d_model         : embedding dimension (must be divisible by nhead=4)
-    nhead           : attention heads, fixed at 4 (§2.5)
-    num_layers      : stacked TransformerEncoderLayer blocks (default 2)
-    dim_feedforward : inner dimension of each feedforward sublayer
-    dropout         : dropout rate
-    """
     def __init__(
         self,
         input_dim: int,
@@ -325,20 +303,15 @@ class GlucoseTransformer(nn.Module):
         self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.head    = nn.Linear(d_model, 1)
 
-        # Xavier uniform initialisation for all weight matrices
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        x : (batch, seq_len, input_dim)
-        returns : (batch, 1)
-        """
-        x = self.input_proj(x)     # (batch, seq_len, d_model)
-        x = self.pos_enc(x)        # inject position info
-        x = self.encoder(x)        # multi-head self-attention × num_layers
-        return self.head(x[:, -1]) # last timestep → (batch, 1)
+        x = self.input_proj(x)
+        x = self.pos_enc(x)
+        x = self.encoder(x)
+        return self.head(x[:, -1])
 
 
 # ============================================================================
@@ -405,7 +378,6 @@ def train_transformer(
 # 8. GRID SEARCH
 # ============================================================================
 def grid_search_dl(x_train, y_train, sample_weights, input_dim, param_grid):
-    """§2.5: grid is d_model [32,64,128] x lr [1e-3, 5e-4], nhead fixed at 4."""
     keys   = list(param_grid.keys())
     combos = list(product(*[param_grid[k] for k in keys]))
 
@@ -478,7 +450,7 @@ def create_bar_plot(ablation_results, title, save_path):
         values = df_results[horizon].dropna().sort_values()
         y_pos  = np.arange(len(values))
         bars   = ax.barh(y_pos, values.values, height=0.65,
-                         edgecolor="black", linewidth=0.6, color="blue")
+                         edgecolor="black", linewidth=0.6, color="pink")
 
         max_val = values.values.max() if len(values) else 1.0
         for bar, val in zip(bars, values.values):
@@ -518,24 +490,24 @@ for window_label, window_size in WINDOW_SIZES.items():
     df_w       = df.copy()
     SEQ_LENGTH = window_size
 
-    # §8A.6 — per-patient row-count check
+    # per-patient row-count check
     min_rows_needed   = SEQ_LENGTH + N_SPLITS + 1
     excluded_patients = []
     for pid, grp in df_w.groupby("Patient_ID"):
         if len(grp) < min_rows_needed:
             excluded_patients.append((pid, len(grp)))
     if excluded_patients:
-        print(f"  ⚠ [{window_label}] {len(excluded_patients)} patient(s) below "
+        print(f"   [{window_label}] {len(excluded_patients)} patient(s) below "
               f"{min_rows_needed} rows:")
         for pid, n in excluded_patients:
             print(f"      Patient {pid}: {n} rows")
     else:
-        print(f"  ✓ [{window_label}] All patients have ≥ {min_rows_needed} rows.")
+        print(f"   [{window_label}] All patients have ≥ {min_rows_needed} rows.")
 
     temp_time_df = df_w.set_index("Timestamp")
 
     # -------------------------------------------------------------------------
-    # PHYSIOLOGICAL VARIABILITY — merge-based alignment (no reindex bug)
+    # PHYSIOLOGICAL VARIABILITY — merge-based alignment
     # -------------------------------------------------------------------------
     print(f"\n[3/10] PHYSIOLOGICAL VARIABILITY anchored to {window_label}...")
     physio_features_all                                   = []
@@ -545,6 +517,7 @@ for window_label, window_size in WINDOW_SIZES.items():
         if col_src not in df_w.columns:
             return
         col = f"{col_src.lower()}_std_{window_label}"
+
         rolled = (
             temp_time_df
             .groupby("Patient_ID")[col_src]
@@ -575,6 +548,7 @@ for window_label, window_size in WINDOW_SIZES.items():
     if "Acc_Vmu" in df_w.columns:
         col_mean = f"acc_vmu_mean_{window_label}"
         col_max  = f"acc_vmu_max_{window_label}"
+
         for col, agg_fn in [(col_mean, "mean"), (col_max, "max")]:
             rolled = (
                 temp_time_df
@@ -592,15 +566,14 @@ for window_label, window_size in WINDOW_SIZES.items():
         activity_features = [col_mean, col_max]
 
     # -------------------------------------------------------------------------
-    # GLUCOSE LOOKUP — dict-based for lag + target extraction
+    # GLUCOSE LOOKUP
     # -------------------------------------------------------------------------
     glucose_lookup: dict = (
         df_w.set_index(["Patient_ID", "Timestamp"])["Glucose"].to_dict()
     )
 
     # -------------------------------------------------------------------------
-    # GLUCOSE LAG (ablation only) — exact timestamp shift
-    # lag is NEVER added to main feature sets (design point 1)
+    # GLUCOSE LAG (ablation only)
     # -------------------------------------------------------------------------
     print(f"\n[5/10] GLUCOSE LAG (ablation-only) anchored to {window_label}...")
     lag_col = f"glucose_lag_{window_label}"
@@ -615,8 +588,7 @@ for window_label, window_size in WINDOW_SIZES.items():
     lag_features  = [lag_col, roc_col]
 
     # -------------------------------------------------------------------------
-    # TARGET EXTRACTION — exact timestamp shift
-    # §2.6: grid search at 30-min horizon only; best params reused for 15/45
+    # TARGET EXTRACTION
     # -------------------------------------------------------------------------
     for h_label in HORIZONS:
         td = pd.Timedelta(h_label.replace("min", "m"))
@@ -627,23 +599,22 @@ for window_label, window_size in WINDOW_SIZES.items():
         ]
 
     # -------------------------------------------------------------------------
-    # FEATURE SETS
+    # FEATURE SETS - NO RAW SENSOR VALUES (redundant with physio variability)
     # -------------------------------------------------------------------------
     all_features = (
-        ["Glucose"] + temporal_features + sensor_cols
+        ["Glucose"] + temporal_features
         + food_features_all + activity_features + physio_features_all
     )
     all_features = [f for f in all_features if f in df_w.columns]
 
     all_features_comparable = (
-        ["Glucose"] + temporal_features + sensor_cols
+        ["Glucose"] + temporal_features
         + food_features_carbs + activity_features + physio_hr
     )
     all_features_comparable = [f for f in all_features_comparable if f in df_w.columns]
 
     # -------------------------------------------------------------------------
     # ABLATION GROUPS
-    # Glucose baseline included in every group except lag (design point 3)
     # -------------------------------------------------------------------------
     feature_groups = {
         "glucose":         ["Glucose"],
@@ -660,7 +631,7 @@ for window_label, window_size in WINDOW_SIZES.items():
         "physio_food":     physio_features_all + food_features_all,
         "food_movement":   food_features_all + activity_features,
         "physio_movement": physio_features_all + activity_features,
-        "lag":             lag_features,  # no Glucose baseline — design point 3
+        "lag":             lag_features,
     }
     feature_groups = {
         name: [f for f in feats if f in df_w.columns]
@@ -679,7 +650,7 @@ for window_label, window_size in WINDOW_SIZES.items():
         print(f"  Fold {i}: train={len(tr):,}  test={len(te):,}")
 
     # -------------------------------------------------------------------------
-    # GRID SEARCH — 30-min horizon only, best params reused for 15/45
+    # GRID SEARCH
     # -------------------------------------------------------------------------
     print(f"\n[7/10] GRID SEARCH ({window_label}, 30-min horizon only)...")
     gs_key = f"{MODEL_NAME}_{window_label}"
@@ -692,7 +663,7 @@ for window_label, window_size in WINDOW_SIZES.items():
             all_features, "Target_30min", SEQ_LENGTH,
         )
         if len(gs_seq["X_train"]) == 0:
-            print(f"  ⚠ No sequences for grid search at {window_label} — skipping")
+            print(f"  No sequences for grid search at {window_label} — skipping")
             continue
 
         gs_weights  = calculate_clinical_weights(gs_seq["y_train"])
