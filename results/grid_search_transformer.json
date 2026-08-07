@@ -1,0 +1,6 @@
+{
+  "transformer_1h": {
+    "d_model": 64,
+    "lr": 0.0005
+  }
+}
