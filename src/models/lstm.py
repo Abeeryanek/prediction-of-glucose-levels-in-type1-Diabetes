@@ -66,6 +66,7 @@ def train_model(
     lr: float = 1e-3,
     max_epochs: int = 150,
     patience: int = 15,
+    loss_fn=None,
 ) -> tuple[GlucoseLSTM, dict, int]:
     """
     Train a GlucoseLSTM with Adam and early stopping.
@@ -78,6 +79,13 @@ def train_model(
     lr              : Adam learning rate (default 1e-3)
     max_epochs      : hard epoch cap (default 150)
     patience        : early-stopping patience in epochs (default 15)
+    loss_fn         : optional callable(preds, target) -> scalar loss tensor.
+                       Defaults to None, which uses plain nn.MSELoss() exactly
+                       as before (non-breaking). Pass e.g.
+                       src.training.losses.clinically_weighted_mse_scaled to
+                       train with clinical sample weighting instead (un-scales
+                       z-scored glucose to mg/dL internally so the clinical
+                       thresholds apply to real glucose values).
 
     Returns
     -------
@@ -94,7 +102,7 @@ def train_model(
     train_loader = _make_loader(X_train, y_train)
     val_loader = _make_loader(X_val, y_val)
 
-    criterion = nn.MSELoss()
+    criterion = loss_fn if loss_fn is not None else nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     history: dict[str, list[float]] = {"train_loss": [], "val_loss": []}

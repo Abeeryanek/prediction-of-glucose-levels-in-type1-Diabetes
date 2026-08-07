@@ -71,3 +71,58 @@ def clinically_weighted_mse(y_pred: torch.Tensor, y_true: torch.Tensor) -> torch
 
     squared_error = (y_pred - y_true) ** 2
     return (squared_error * weights).mean()
+
+
+def clinically_weighted_mse_scaled(
+    y_pred: torch.Tensor,
+    y_true: torch.Tensor,
+    y_mean: float,
+    y_std: float,
+) -> torch.Tensor:
+    """
+    Option-A variant of clinically_weighted_mse() for our unified pipeline,
+    which z-scores glucose (X *and* y) before training — unlike Abeer's
+    original, which only ever scales the features (see
+    clean_treaining/lstm.py build_seq_dataset(): StandardScaler is fit on
+    `features` only; `y_train`/`y_test` are the raw target column, mg/dL).
+    Decision made with Abeer: keep z-scoring the model's target, but
+    un-scale back to mg/dL *inside the loss* so her thresholds
+    (54/70/180/250) apply to real glucose.
+
+    y_mean, y_std: the mean/std the glucose target was scaled with (i.e.
+    the fitted target scaler's parameters), so
+        y_true_mgdl = y_true * y_std + y_mean
+    recovers real glucose from the z-scored label.
+
+    Design decision — squared error computed in mg/dL space, not scaled
+    space:
+    Abeer's loss is ((y_pred_mgdl - y_true_mgdl) ** 2 * weights).mean() —
+    both the weights AND the error term operate on raw mg/dL, because her
+    model's output is never scaled to begin with. Under Option A our
+    model's raw output is a z-score, so matching her numbers requires
+    un-scaling y_pred as well as y_true before differencing — not just
+    un-scaling y_true for the weight lookup. If the squared-error term were
+    left in scaled space (only weights computed from un-scaled y_true), the
+    result would carry correct weights but the wrong units: scaled MSE is
+    related to mg/dL MSE by (mg/dL_error)^2 = (y_std^2) * (scaled_error)^2
+    only when comparing the same points, and diverges further once you're
+    averaging different weighted subsets — it would NOT reduce to the same
+    scalar as Abeer's loss, only be proportional to it in the unweighted
+    case. So both y_true and y_pred are un-scaled to mg/dL first; weights
+    and squared error are then both computed on those mg/dL values, exactly
+    mirroring Abeer's function. This does not change training dynamics:
+    y_pred_mgdl is an affine function of y_pred_scaled with constant slope
+    y_std, so gradients w.r.t. model parameters point the same direction,
+    just rescaled by y_std^2 (equivalent to a learning-rate rescale).
+    """
+    y_true_mgdl = y_true * y_std + y_mean
+    y_pred_mgdl = y_pred * y_std + y_mean
+
+    weights = torch.ones_like(y_true_mgdl, dtype=torch.float32)
+    weights[y_true_mgdl < 54] = 3.0
+    weights[(y_true_mgdl >= 54) & (y_true_mgdl < 70)] = 2.5
+    weights[(y_true_mgdl > 180) & (y_true_mgdl <= 250)] = 1.5
+    weights[y_true_mgdl > 250] = 2.0
+
+    squared_error = (y_pred_mgdl - y_true_mgdl) ** 2
+    return (squared_error * weights).mean()
