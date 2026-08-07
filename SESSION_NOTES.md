@@ -1,33 +1,35 @@
 ## Session Summary — Latest
 
-## Consolidation progress (one shared pipeline)
+## MILESTONE: normalization blocker cleared ✅
+All 5 BIG IDEAs neural models now behave like the shared pipeline:
+train on scaled glucose, weights from mg/dL (y_train_raw), metrics in mg/dL.
+- lstm.py + transformer_bigideas.py: FIXED (units mismatch + preds_scaled
+  typo). Both sanity-run on real data: lstm 14.41, transformer 17.26 mg/dL
+  (would be ~116 if bug present). Committed.
+- cnn_lstm (Abeer fixed), autoencoder, tcn: verified already correct.
+The normalization mismatch that blocked the port for several sessions is
+GONE. Her models and mine now do the same thing.
+
+## Consolidation state
 DONE:
-- Training conditions unified in src/models (150/15/32 + seed) — committed
-- Clinically-weighted MSE ported to src/training/losses.py — verified
-  identical to Abeer's (match within 1e-6), committed (db8a154)
-- Weight scheme: <54→3.0, 54-70→2.5, in-range→1.0, 180-250→1.5, >250→2.0
-  (hypo weighted hardest — clinically justified)
+- Training conditions unified (150/15/32 + seed)
+- Weighted MSE ported — Option A (un-scales to mg/dL), verified vs Abeer's
+- loss_fn hook in lstm.py (non-breaking)
+- All BIG IDEAs neural models units-correct + proven
 
-⚠️ BLOCKER FOUND — normalization mismatch (resolve FIRST tomorrow):
-- OUR pipeline z-scores glucose before training → loss sees SCALED values
-- ABEER's weighted MSE operates on mg/dL → weights (54/70/180/250) are
-  real glucose thresholds
-- Wiring her loss into our scaled pipeline as-is would be SILENTLY WRONG
-  (thresholds meaningless on z-scored values)
-- SAME risk applies to porting her CNN-LSTM/GB models: if they expect
-  un-scaled input, dropping them into our scaled pipeline = garbage
+NEXT (port now unblocked):
+- Port Abeer's 2 models (CNN-LSTM, GB) from clean_treaining/ into
+  src/models/ — GB is scale-invariant (easy), CNN-LSTM now units-correct
+- Make BIG IDEAs runner call the shared src/ pipeline
+- Wire weighted loss into the other 4 models (hook only in lstm so far)
+- THEN full re-run at final settings
 
-NEEDS ABEER (asked, awaiting answer):
-1. Unified pipeline: keep z-scoring + un-scale inside loss for weighting
-   (proposed Option A)?
-2. Do her CNN-LSTM/GB models expect scaled or un-scaled input?
+⚠️ STILL TRUE — results are stale:
+- All committed results + presentation numbers are from OLD settings
+  (100/10/64, no seed). Full re-run happens ONCE, after port complete.
+- Presentation still custom style, not Moodle template.
 
-DO NOT tomorrow until resolved:
-- Do NOT wire weighted loss into models yet
-- Do NOT port her 2 models yet
-- Both depend on the normalization decision
-
-## Also still pending (unrelated to consolidation):
-- Full re-run at final settings (150/15/32) — all current results are
-  STALE, from old 100/10/64 settings. Presentation numbers will change.
-- Presentation still in custom style, not Moodle template
+## Coordination note
+Abeer gave permission to fix her files; confirm she's off lstm.py +
+transformer_bigideas.py before assuming they're settled. She's been
+actively editing her models.
