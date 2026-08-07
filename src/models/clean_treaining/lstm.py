@@ -707,7 +707,7 @@ for window_label, window_size in WINDOW_SIZES.items():
             )
             model.eval()
             with torch.no_grad():
-                preds = model(torch.tensor(seq["X_test"])).numpy().flatten()
+                preds_scaled = model(torch.tensor(seq["X_test"])).numpy().flatten()
             preds = seq["y_scaler"].inverse_transform(preds_scaled.reshape(-1,1)).flatten()
             rmse = float(np.sqrt(mean_squared_error(seq["y_test_raw"], preds)))
 

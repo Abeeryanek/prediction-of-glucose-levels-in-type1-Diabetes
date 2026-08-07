@@ -709,7 +709,7 @@ for window_label, window_size in WINDOW_SIZES.items():
                 with torch.no_grad():
                     preds_scaled = model(torch.tensor(seq["X_test"])).numpy().flatten()
                 preds = seq["y_scaler"].inverse_transform(preds_scaled.reshape(-1,1)).flatten()
-                m = metrics_dict(seq["y_test"], preds)
+                m = metrics_dict(seq["y_test_raw"], preds)
                 all_results.append({
                     "model": MODEL_NAME, "window": window_label,
                     "horizon": h_label, "subset": subset,
@@ -718,7 +718,7 @@ for window_label, window_size in WINDOW_SIZES.items():
 
                 key = (window_label, subset, h_label)
                 pooled_predictions.setdefault(key, {"y_true": [], "y_pred": []})
-                pooled_predictions[key]["y_true"].append(seq["y_test"])
+                pooled_predictions[key]["y_true"].append(seq["y_test_raw"])
                 pooled_predictions[key]["y_pred"].append(preds)
 
                 print(f"  [fold {fold_i}] {subset:10s} {h_label:6s} "
@@ -751,7 +751,7 @@ for window_label, window_size in WINDOW_SIZES.items():
             )
             model.eval()
             with torch.no_grad():
-                preds = model(torch.tensor(seq["X_test"])).numpy().flatten()
+                preds_scaled = model(torch.tensor(seq["X_test"])).numpy().flatten()
             preds = seq["y_scaler"].inverse_transform(preds_scaled.reshape(-1,1)).flatten()
             rmse = float(np.sqrt(mean_squared_error(seq["y_test_raw"], preds)))
 
