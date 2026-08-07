@@ -226,18 +226,23 @@ def build_seq_dataset(df_tr, df_te, features, target_col, seq_length):
     X_train_2d = scaler.fit_transform(train_clean[features])
     X_test_2d  = scaler.transform(test_clean[features])
 
-    X_train_3d, y_train = create_3d_sequences(
+    X_train_3d, y_train_raw = create_3d_sequences(
         X_train_2d, train_clean[target_col],
         train_clean["Patient_ID"], train_clean["Timestamp"], seq_length,
     )
-    X_test_3d, y_test = create_3d_sequences(
+    X_test_3d, y_test_raw = create_3d_sequences(
         X_test_2d, test_clean[target_col],
         test_clean["Patient_ID"], test_clean["Timestamp"], seq_length,
     )
-
+    y_scaler = StandardScaler()
+    y_train = (y_scaler.fit_transform(y_train_raw.reshape(-1, 1)).flatten().astype(np.float32)
+               if len(y_train_raw) else y_train_raw)
+    y_test  = (y_scaler.transform(y_test_raw.reshape(-1, 1)).flatten().astype(np.float32)
+               if len(y_test_raw) else y_test_raw)
     return {
-        "X_train": X_train_3d, "y_train": y_train,
-        "X_test":  X_test_3d,  "y_test":  y_test,
+        "X_train": X_train_3d, "y_train": y_train, "y_train_raw": y_train_raw,
+        "X_test":  X_test_3d,  "y_test":  y_test, "y_test_raw":  y_test_raw,
+        "y_scaler": y_scaler,
         "n_train": len(train_clean), "n_test": len(test_clean),
     }
 
@@ -636,7 +641,7 @@ for window_label, window_size in WINDOW_SIZES.items():
             print(f"   No sequences for grid search at {window_label} — skipping")
             continue
 
-        gs_weights  = calculate_clinical_weights(gs_seq["y_train"])
+        gs_weights  = calculate_clinical_weights(gs_seq["y_train_raw"])
         best_params, best_score = grid_search_dl(
             gs_seq["X_train"], gs_seq["y_train"], gs_weights,
             input_dim=len(all_features), param_grid=DL_PARAM_GRID,
@@ -662,7 +667,7 @@ for window_label, window_size in WINDOW_SIZES.items():
                           f"no sequences, skipping")
                     continue
 
-                weights = calculate_clinical_weights(seq["y_train"])
+                weights = calculate_clinical_weights(seq["y_train_raw"])
                 model, val_loss, epochs_trained = train_autoencoder(
                     seq["X_train"], seq["y_train"], weights,
                     input_dim=len(features),
@@ -671,8 +676,8 @@ for window_label, window_size in WINDOW_SIZES.items():
                 )
                 model.eval()
                 with torch.no_grad():
-                    preds = model(torch.tensor(seq["X_test"])).numpy().flatten()
-
+                    preds_scaled = model(torch.tensor(seq["X_test"])).numpy().flatten()
+                preds = seq["y_scaler"].inverse_transform(preds_scaled.reshape(-1,1)).flatten()
                 m = metrics_dict(seq["y_test"], preds)
                 all_results.append({
                     "model": MODEL_NAME, "window": window_label,
@@ -706,7 +711,7 @@ for window_label, window_size in WINDOW_SIZES.items():
             if len(seq["X_train"]) == 0 or len(seq["X_test"]) == 0:
                 continue
 
-            weights = calculate_clinical_weights(seq["y_train"])
+            weights = calculate_clinical_weights(seq["y_train_raw"])
             model, _, _ = train_autoencoder(
                 seq["X_train"], seq["y_train"], weights,
                 input_dim=len(combo_features),
@@ -715,7 +720,8 @@ for window_label, window_size in WINDOW_SIZES.items():
             )
             model.eval()
             with torch.no_grad():
-                preds = model(torch.tensor(seq["X_test"])).numpy().flatten()
+                preds_scaled = model(torch.tensor(seq["X_test"])).numpy().flatten()
+            preds = seq["y_scaler"].inverse_transform(preds_scaled.reshape(-1,1)).flatten()
             rmse = float(np.sqrt(mean_squared_error(seq["y_test"], preds)))
 
             all_ablation_results.append({

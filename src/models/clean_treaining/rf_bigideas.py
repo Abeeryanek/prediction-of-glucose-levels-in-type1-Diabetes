@@ -93,15 +93,15 @@ df["Timestamp"] = pd.to_datetime(df["Timestamp"])
 df = df.sort_values(["Patient_ID", "Timestamp"]).reset_index(drop=True)
 
 # Validate Patient_ID loading
-print(f"\n📊 DATA VALIDATION:")
+print(f"\n DATA VALIDATION:")
 print(f"  Total rows: {len(df):,}")
 print(f"  Unique patients: {df['Patient_ID'].nunique()}")
 print(f"  Patient IDs: {sorted(df['Patient_ID'].unique())}")
 
 if df['Patient_ID'].nunique() < 2:
-    raise ValueError(f"❌ CRITICAL: Only {df['Patient_ID'].nunique()} unique patient(s)!")
+    raise ValueError(f" CRITICAL: Only {df['Patient_ID'].nunique()} unique patient(s)!")
 
-print(f"✅ Successfully loaded {len(df):,} rows from {df['Patient_ID'].nunique()} patients")
+print(f" Successfully loaded {len(df):,} rows from {df['Patient_ID'].nunique()} patients")
 
 # ============================================================================
 # 2. BASE FEATURE ENGINEERING
