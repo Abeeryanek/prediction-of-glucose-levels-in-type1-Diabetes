@@ -1,3 +1,43 @@
+## Weekend solo work — progress (Ohio/Glucdict side only)
+
+Goal: finish unifying MY shared pipeline (src/models/) and re-run Ohio +
+Glucdict at final settings. BIG IDEAs left for after Monday (needs Abeer
++ architecture decision).
+
+DONE this session:
+- loss_fn hook added + verified non-breaking (bit-identical with
+  loss_fn=None) in: lstm.py (earlier), autoencoder.py, tcn.py
+
+STILL TODO on hooks:
+- transformer.py — loss_fn hook not yet added (last of the 4 neural models)
+
+REMAINING weekend steps (in order):
+1. Add loss_fn hook to transformer.py (verify non-breaking)
+2. Wire RF weighting into run_experiments.py (capability exists in
+   random_forest.py, not yet called)
+3. Wire weighted loss into neural models in the run scripts
+4. Verify Glucdict runs with all changes
+5. Re-run Ohio + Glucdict at final settings
+
+## ⚠️ UNRESOLVED DECISION — weighted vs unweighted reporting
+
+Question: how to report against literature. Literature RMSE (Bertachi
+19.33, Kalita 16.57, Rodriguez 18.60) is UNWEIGHTED. Reporting
+weighted-trained RMSE against unweighted literature makes our numbers
+look artificially worse (weighting trades RMSE for hypo/hyper accuracy).
+LEANING: run BOTH — unweighted for literature comparison (apples-to-
+apples), weighted for clinical-safety story (Clarke Zone A).
+→ Also a good question to raise with professor Monday.
+DO NOT commit to weighted-only-vs-unweighted-literature — it invites
+"why is your RMSE worse" with no good answer.
+
+## For Monday presentation:
+- "Finished": unified pipeline re-run cleanly on Ohio + Glucdict (goal)
+- Open/next: BIG IDEAs unification (needs Abeer + architecture decision),
+  interpolation experiments (not started), CNN-LSTM port
+- Decisions to get from professor: (1) architecture-match requirement
+  across datasets, (2) weighted vs unweighted reporting framing
+
 ## Unification status — ACCURATE (per this session's evidence)
 
 Confirmed with supervisor: unification target is model-family/training/
