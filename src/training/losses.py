@@ -123,11 +123,17 @@ def clinically_weighted_mse_scaled(
     y_true_mgdl = y_true * y_std + y_mean
     y_pred_mgdl = y_pred * y_std + y_mean
 
-    weights = torch.ones_like(y_true_mgdl, dtype=torch.float32)
-    weights[y_true_mgdl < 54] = 3.0
-    weights[(y_true_mgdl >= 54) & (y_true_mgdl < 70)] = 2.5
-    weights[(y_true_mgdl > 180) & (y_true_mgdl <= 250)] = 1.5
-    weights[y_true_mgdl > 250] = 2.0
+    # calculate_clinical_weights sizes its output off len(input) (first-dim
+    # only), so a 2D (batch, horizon) tensor must be flattened before the
+    # call and reshaped back — weights are computed elementwise off each
+    # value's own mg/dL level regardless of shape, so this is a no-op for
+    # the actual weight assigned to any given element.
+    weights_np = calculate_clinical_weights(
+        y_true_mgdl.detach().cpu().numpy().ravel()
+    )
+    weights = torch.as_tensor(
+        weights_np, dtype=torch.float32, device=y_true_mgdl.device
+    ).reshape(y_true_mgdl.shape)
 
     squared_error = (y_pred_mgdl - y_true_mgdl) ** 2
     return (squared_error * weights).mean()
