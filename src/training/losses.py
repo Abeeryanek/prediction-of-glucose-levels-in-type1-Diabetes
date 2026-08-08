@@ -35,13 +35,18 @@ import numpy as np
 import torch
 
 
-def calculate_clinical_weights(y_true: np.ndarray) -> np.ndarray:
+def calculate_clinical_weights(glucose_mgdl: np.ndarray) -> np.ndarray:
+    """Clinical sample weights from glucose in mg/dL.
+    Weights dangerous ranges more heavily (hypo hardest):
+      <54 -> 3.0, 54-70 -> 2.5, in-range -> 1.0, 180-250 -> 1.5, >250 -> 2.0
+    Used by tree models (via sample_weight) and the weighted MSE loss,
+    so all models share one weighting definition.
+    Input MUST be mg/dL, not scaled.
+
+    NumPy port of Abeer's calculate_clinical_weights (gb_bigideas.py:177-183)
+    — thresholds and weight multipliers unchanged.
     """
-    NumPy port of Abeer's calculate_clinical_weights — thresholds and weight
-    multipliers unchanged. Intended for tree-model `sample_weight=` (RF/GB)
-    and as the reference this module's torch loss is verified against.
-    """
-    y_true = np.asarray(y_true)
+    y_true = np.asarray(glucose_mgdl)
     weights = np.ones(len(y_true), dtype=np.float32)
     weights[y_true < 54] = 3.0
     weights[(y_true >= 54) & (y_true < 70)] = 2.5
