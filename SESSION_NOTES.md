@@ -19,24 +19,34 @@ REMAINING weekend steps (in order):
 4. Verify Glucdict runs with all changes
 5. Re-run Ohio + Glucdict at final settings
 
-## ⚠️ UNRESOLVED DECISION — weighted vs unweighted reporting
+## ✅ RESOLVED — weighted vs unweighted reporting
 
-Question: how to report against literature. Literature RMSE (Bertachi
-19.33, Kalita 16.57, Rodriguez 18.60) is UNWEIGHTED. Reporting
-weighted-trained RMSE against unweighted literature makes our numbers
-look artificially worse (weighting trades RMSE for hypo/hyper accuracy).
-LEANING: run BOTH — unweighted for literature comparison (apples-to-
-apples), weighted for clinical-safety story (Clarke Zone A).
-→ Also a good question to raise with professor Monday.
-DO NOT commit to weighted-only-vs-unweighted-literature — it invites
-"why is your RMSE worse" with no good answer.
+Per FINAL_EXPERIMENTS_PLAN_DETAILED.md (§1, §8A.2, §10 item 6, resolved
+per supervisor's recommendation): both losses are run, not one or the
+other. Plain MSE (`nn.MSELoss`) is the literature-comparable headline
+RMSE (Bertachi 19.33, Kalita 16.57, Rodriguez 18.60 are all unweighted,
+so plain-MSE RMSE is what's directly comparable). Clinically-weighted
+MSE is the secondary clinical-safety report — whether up-weighting
+hypo/hyper errors improves Clarke Zone A/D/E without hurting overall
+RMSE. Applied uniformly across all 5 models and all 3 datasets.
+Weekend plan: run plain-MSE first (Monday), weighted after.
+
+Actually-open item per the plan: **§8A.3 shuffle experiment** —
+BIG IDEAs currently shuffles 3 of 5 models (LSTM, CNN-LSTM, Transformer)
+but not the other 2 (Autoencoder, TCN), and this inconsistency "needs to
+be tested rather than resolved by assumption." Plan: train each model
+twice (`shuffle=True` vs `shuffle=False`), compare RMSE and epochs-to-
+convergence, before any cross-model BIG IDEAs comparison is treated as
+fair. This is genuinely undecided — raise with professor Monday if time
+allows.
 
 ## For Monday presentation:
 - "Finished": unified pipeline re-run cleanly on Ohio + Glucdict (goal)
 - Open/next: BIG IDEAs unification (needs Abeer + architecture decision),
   interpolation experiments (not started), CNN-LSTM port
 - Decisions to get from professor: (1) architecture-match requirement
-  across datasets, (2) weighted vs unweighted reporting framing
+  across datasets, (2) §8A.3 shuffle policy for BIG IDEAs (genuinely
+  open — weighted vs unweighted is already resolved per plan)
 
 ## Unification status — ACCURATE (per this session's evidence)
 
