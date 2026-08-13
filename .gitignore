@@ -11,7 +11,15 @@ Glucdict Dataset.zip
 
 # Scratch and build files
 make_pptx.py
+make_pptx_final.py
 scratchpad/
+
+# Presentation materials and one-off slide scripts — not submission content
+SESSION_NOTES.md
+PRESENTATION_MONDAY.md
+PRESENTATION_MONDAY.pptx
+PRESENTATION_FINAL.pptx
+generate_rf_predictions_30min.py
 
 # Log and error capture files from background runs
 run_*_log.txt
