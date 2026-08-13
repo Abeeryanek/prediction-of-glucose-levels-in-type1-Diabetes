@@ -2,6 +2,16 @@
 import sys
 import os
 
+# Addresses the duplicate-OpenMP-DLL root cause (torch + numpy/sklearn each
+# bundle their own libiomp5md.dll on Windows). Must be set before torch is
+# imported. Tested and confirmed NOT sufficient by itself to prevent the
+# Windows access-violation crash on interpreter teardown (0xC0000409) seen
+# after PyTorch DataLoader-based training completes — kept anyway since it's
+# the documented mitigation for the underlying conflict and is harmless; the
+# actual fix is the os._exit(0) at the end of this script (after all results
+# are saved), which sidesteps teardown entirely.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 # Project root on path so `src.*` imports resolve
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -486,3 +496,11 @@ print(f"  results_all_models.csv        {n_rows} rows x {n_cols} columns")
 print( "  clarke_30min_all_models.png   Clarke EGA for all 4 models")
 print( "  predictions_559_30min.png     24-h forecast comparison, patient 559")
 print( "  grid_search_results.json      best hyperparameters")
+
+# All results (CSV + both PNGs + grid search JSON) are written above this
+# point. os._exit(0) skips Python's normal interpreter teardown (atexit
+# handlers, garbage collection of torch/DataLoader objects), which is
+# exactly where the Windows access-violation crash (0xC0000409, duplicate
+# OpenMP DLL teardown) occurs after PyTorch training — nothing after this
+# line, so nothing is short-circuited.
+os._exit(0)
