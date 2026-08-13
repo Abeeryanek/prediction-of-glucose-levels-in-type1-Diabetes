@@ -13,6 +13,7 @@ has no official train/test file split.
 import sys
 import os
 import json
+from functools import partial
 
 # Addresses the duplicate-OpenMP-DLL root cause (torch + numpy/sklearn each
 # bundle their own libiomp5md.dll on Windows). Must be set before torch is
@@ -36,6 +37,7 @@ import torch
 
 from src.preprocessing.glucdict_loader import load_patient, ALL_USERS, GLUCDICT_BASE
 from src.training.pipeline import make_splits
+from src.training.losses import clinically_weighted_mse_scaled
 from src.models import random_forest as rf
 from src.models.lstm import GlucoseLSTM, train_model as lstm_train
 from src.models.autoencoder import GlucoseSeq2Seq, train_model as ae_train
@@ -51,6 +53,14 @@ HORIZON     = 6
 STEP_30MIN  = 5      # index 5 = 30-min step in the multi-step output
 TRAIN_RATIO = 0.80   # chronological split (shuffle=False)
 MIN_ROWS    = 100    # skip users with too little data for window_size(12)+horizon(6)+val split
+
+# Single switch controlling weighting for ALL 5 models consistently, same
+# convention as run_experiments.py. False = plain/unweighted everywhere
+# (literature-comparable); True = clinically-weighted everywhere
+# (clinical-safety condition). Applies to both the feature-ablation loop
+# (RF+LSTM) and the Section 2 5-model loop.
+# Professor confirmed weighted-only for submission — set to True.
+USE_CLINICAL_WEIGHTING = True
 
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -129,9 +139,15 @@ for feat_name, feat_cols in FEAT_SETS.items():
             y_true_30   = splits_dl["y_test_raw"][:, STEP_30MIN]   # mg/dL
             n_features  = splits_dl["X_train"].shape[2]
 
+            # Single switch (USE_CLINICAL_WEIGHTING, top of file) drives both
+            # the neural loss_fn and the RF sample_weight consistently.
+            loss_fn        = (partial(clinically_weighted_mse_scaled, y_mean=y_mean, y_std=y_std)
+                               if USE_CLINICAL_WEIGHTING else None)
+            rf_y_train_raw = splits_rf["y_train_raw"] if USE_CLINICAL_WEIGHTING else None
+
             # ── Random Forest ─────────────────────────────────────────────────
             rf_model   = rf.train(splits_rf["X_train"], splits_rf["y_train"],
-                                  params=rf_params)
+                                  params=rf_params, y_train_raw=rf_y_train_raw)
             rf_pred_30 = (rf_model.predict(splits_rf["X_test"]) * y_std + y_mean
                           )[:, STEP_30MIN]
 
@@ -142,7 +158,7 @@ for feat_name, feat_cols in FEAT_SETS.items():
             lstm_model, _, _ = lstm_train(
                 splits_dl["X_train"], splits_dl["y_train"],
                 splits_dl["X_val"],   splits_dl["y_val"],
-                model=lstm_model, lr=lstm_lr,
+                model=lstm_model, lr=lstm_lr, loss_fn=loss_fn,
             )
             lstm_model.eval().to(device)
             X_t = torch.tensor(
@@ -337,8 +353,15 @@ for pid in cohort:
         y_true_30   = splits_dl["y_test_raw"][:, STEP_30MIN]
         n_features  = splits_dl["X_train"].shape[2]
 
+        # Single switch (USE_CLINICAL_WEIGHTING, top of file) drives both
+        # the neural loss_fn and the RF sample_weight consistently.
+        loss_fn        = (partial(clinically_weighted_mse_scaled, y_mean=y_mean, y_std=y_std)
+                           if USE_CLINICAL_WEIGHTING else None)
+        rf_y_train_raw = splits_rf["y_train_raw"] if USE_CLINICAL_WEIGHTING else None
+
         # ── Random Forest ─────────────────────────────────────────────────
-        rf_model = rf.train(splits_rf["X_train"], splits_rf["y_train"], params=rf_params)
+        rf_model = rf.train(splits_rf["X_train"], splits_rf["y_train"],
+                             params=rf_params, y_train_raw=rf_y_train_raw)
         rf_pred_30 = (rf_model.predict(splits_rf["X_test"]) * y_std + y_mean)[:, STEP_30MIN]
 
         # ── LSTM ──────────────────────────────────────────────────────────
@@ -346,7 +369,7 @@ for pid in cohort:
         lstm_model, _, lstm_epochs = lstm_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
-            model=lstm_model, lr=lstm_lr,
+            model=lstm_model, lr=lstm_lr, loss_fn=loss_fn,
         )
 
         # ── Autoencoder ───────────────────────────────────────────────────
@@ -354,7 +377,7 @@ for pid in cohort:
         ae_model, _, ae_epochs = ae_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
-            model=ae_model, lr=ae_lr,
+            model=ae_model, lr=ae_lr, loss_fn=loss_fn,
         )
 
         # ── TCN ───────────────────────────────────────────────────────────
@@ -362,7 +385,7 @@ for pid in cohort:
         tcn_model, _, tcn_epochs = tcn_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
-            model=tcn_model, lr=tcn_lr,
+            model=tcn_model, lr=tcn_lr, loss_fn=loss_fn,
         )
 
         # ── Transformer ───────────────────────────────────────────────────
@@ -372,7 +395,7 @@ for pid in cohort:
         tr_model, _, tr_epochs = tr_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
-            model=tr_model, lr=tr_lr,
+            model=tr_model, lr=tr_lr, loss_fn=loss_fn,
         )
 
         preds_30 = {

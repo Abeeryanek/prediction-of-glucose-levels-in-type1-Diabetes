@@ -24,6 +24,7 @@ print("SECTION 1 — Imports and Configuration")
 print("=" * 60)
 
 from pathlib import Path
+from functools import partial
 import json
 import numpy as np
 import pandas as pd
@@ -38,6 +39,7 @@ from src.training.grid_search import (
     grid_search_rf, grid_search_lstm,
     grid_search_autoencoder, grid_search_tcn, grid_search_transformer,
 )
+from src.training.losses import clinically_weighted_mse_scaled
 from src.models import random_forest as rf
 from src.models.lstm import GlucoseLSTM, train_model as lstm_train, evaluate as lstm_eval
 from src.models.autoencoder import GlucoseSeq2Seq, train_model as ae_train, evaluate as ae_eval
@@ -49,6 +51,15 @@ from src.evaluation.plots import plot_clarke_error_grid, plot_predictions
 DATA_ROOT   = Path("data/ohio")
 RESULTS_DIR = Path("results/ohio")
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Single switch controlling weighting for ALL 5 models consistently.
+# False = plain/unweighted everywhere (neural: nn.MSELoss via loss_fn=None;
+#         RF: no sample_weight) — the literature-comparable condition.
+# True  = clinically-weighted everywhere (neural: clinically_weighted_mse_scaled;
+#         RF: sample_weight via calculate_clinical_weights) — the
+#         clinical-safety condition.
+# Professor confirmed weighted-only for submission — set to True.
+USE_CLINICAL_WEIGHTING = True
 
 WINDOW_SIZE = 12
 HORIZON     = 9      # 9 steps x 5 min = 45 min max
@@ -241,9 +252,17 @@ for pid in ALL_PATIENTS:
         n_features  = splits_dl["X_train"].shape[2]
         y_test_raw  = splits_dl["y_test_raw"]
 
+        # Single switch (USE_CLINICAL_WEIGHTING, top of file) drives both the
+        # neural loss_fn and the RF sample_weight — so the run is either
+        # entirely plain or entirely weighted, never mixed.
+        loss_fn        = (partial(clinically_weighted_mse_scaled, y_mean=y_mean, y_std=y_std)
+                           if USE_CLINICAL_WEIGHTING else None)
+        rf_y_train_raw = splits_rf["y_train_raw"] if USE_CLINICAL_WEIGHTING else None
+
         rf_model = rf.train(
             splits_rf["X_train"], splits_rf["y_train"],
             params=gs_results["rf"],
+            y_train_raw=rf_y_train_raw,
         )
 
         lstm_hs = gs_results["lstm"].get("hidden_size", 64)
@@ -253,7 +272,7 @@ for pid in ALL_PATIENTS:
         lstm_model, _, lstm_epochs = lstm_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
-            model=lstm_model, lr=lstm_lr,
+            model=lstm_model, lr=lstm_lr, loss_fn=loss_fn,
         )
 
         ae_latent = gs_results["autoencoder"].get("latent_size", 32)
@@ -262,7 +281,7 @@ for pid in ALL_PATIENTS:
         ae_model, _, ae_epochs = ae_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
-            model=ae_model, lr=ae_lr,
+            model=ae_model, lr=ae_lr, loss_fn=loss_fn,
         )
 
         tcn_filters = gs_results["tcn"].get("num_filters", 64)
@@ -271,7 +290,7 @@ for pid in ALL_PATIENTS:
         tcn_model, _, tcn_epochs = tcn_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
-            model=tcn_model, lr=tcn_lr,
+            model=tcn_model, lr=tcn_lr, loss_fn=loss_fn,
         )
 
         tr_d_model = gs_results["transformer"].get("d_model", 64)
@@ -283,7 +302,7 @@ for pid in ALL_PATIENTS:
         tr_model, _, tr_epochs = tr_train(
             splits_dl["X_train"], splits_dl["y_train"],
             splits_dl["X_val"],   splits_dl["y_val"],
-            model=tr_model, lr=tr_lr,
+            model=tr_model, lr=tr_lr, loss_fn=loss_fn,
         )
 
         print(
