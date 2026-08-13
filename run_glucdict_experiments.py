@@ -12,6 +12,7 @@ has no official train/test file split.
 """
 import sys
 import os
+import gc
 import json
 from functools import partial
 
@@ -123,6 +124,9 @@ print(f"Device: {device}\n")
 for feat_name, feat_cols in FEAT_SETS.items():
     print(f"-- {feat_name}  {feat_cols}")
     for pid in cohort:
+        # Reset to None up front so the `finally` cleanup below can safely
+        # check each one even if an earlier stage raises first.
+        rf_model = lstm_model = None
         try:
             splits_rf = make_splits(
                 train_data[pid], test_data[pid], feat_cols,
@@ -188,6 +192,16 @@ for feat_name, feat_cols in FEAT_SETS.items():
 
         except Exception as exc:
             print(f"   [{pid}]  ERROR — {exc}")
+
+        finally:
+            # Release GPU/RAM before the next patient/feature-set iteration.
+            # This loop runs up to 4 feat_sets x N patients LSTM trainings
+            # back to back with no cleanup previously — same accumulation
+            # risk as the Ohio patient-588 hang, just with more iterations.
+            rf_model = lstm_model = None
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
 
     print()
 
@@ -337,6 +351,9 @@ def _dl_predict_30(model):
 
 for pid in cohort:
     print(f"[{pid}] ... ", end="", flush=True)
+    # Reset to None up front so the `finally` cleanup below can safely check
+    # each one even if an earlier stage raises before later models exist.
+    rf_model = lstm_model = ae_model = tcn_model = tr_model = None
     try:
         splits_rf = make_splits(
             train_data[pid], test_data[pid], GLUCOSE_ONLY,
@@ -433,6 +450,15 @@ for pid in cohort:
 
     except Exception as exc:
         print(f"ERROR — {exc}")
+
+    finally:
+        # Release GPU/RAM before the next patient — same fix as the Ohio
+        # patient-588 hang: 4 GPU models x N patients with no cleanup
+        # accumulates CUDA memory fragmentation across the loop.
+        rf_model = lstm_model = ae_model = tcn_model = tr_model = None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
 
 print()
 print("5-model comparison loop complete.")

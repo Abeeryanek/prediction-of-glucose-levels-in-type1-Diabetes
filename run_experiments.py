@@ -1,6 +1,7 @@
 """Runner script: mirrors experiments/ohio_experiments.ipynb cell by cell."""
 import sys
 import os
+import gc
 
 # Addresses the duplicate-OpenMP-DLL root cause (torch + numpy/sklearn each
 # bundle their own libiomp5md.dll on Windows). Must be set before torch is
@@ -230,7 +231,47 @@ def _dl_predict(model, X, y_mean, y_std):
         return model(X_t).cpu().numpy() * y_std + y_mean
 
 
+def _validate_splits(splits_rf: dict, splits_dl: dict, min_samples: int = 1) -> tuple[bool, str]:
+    """
+    Guard against degenerate per-patient data BEFORE the expensive,
+    GPU-bound training block runs.
+
+    Checks: non-empty train/val/test windows, and no all-NaN target arrays.
+    (Note: create_windows() already raises on truly 0 windows, and the
+    per-patient try/except already catches that — this guard exists to fail
+    fast, with a clear diagnostic message, before spending GPU time on a
+    patient whose data is borderline rather than letting it surface deep
+    inside train_model() as a bare ZeroDivisionError.)
+
+    Returns (True, "") if usable, else (False, human-readable reason).
+    """
+    n_train = splits_dl["X_train"].shape[0]
+    n_val   = splits_dl["X_val"].shape[0]
+    n_test  = splits_dl["X_test"].shape[0]
+
+    if n_train < min_samples or n_val < min_samples or n_test < min_samples:
+        return False, (
+            f"insufficient usable data after cleaning — "
+            f"train={n_train} val={n_val} test={n_test} samples "
+            f"(need >= {min_samples} each)"
+        )
+
+    if splits_rf["X_train"].shape[0] < min_samples:
+        return False, f"RF (flat) split has {splits_rf['X_train'].shape[0]} train samples"
+
+    for name in ("y_train", "y_val", "y_test"):
+        if np.all(np.isnan(splits_dl[name])):
+            return False, f"target array '{name}' is entirely NaN after cleaning"
+
+    return True, ""
+
+
 for pid in ALL_PATIENTS:
+    # Reset to None up front so the `finally` cleanup below can safely check
+    # each one even if an earlier stage (e.g. RF or LSTM training) raises
+    # before later models are ever created.
+    rf_model = lstm_model = ae_model = tcn_model = tr_model = None
+
     try:
         cohort = "2018" if pid in COHORT_2018 else "2020"
         print(f"[{pid}] ({cohort}) ... ", end="", flush=True)
@@ -245,6 +286,12 @@ for pid in ALL_PATIENTS:
             CLINICAL_FEATURES, horizon_steps=HORIZON,
             multi_step=True, flat=False,
         )
+
+        ok, reason = _validate_splits(splits_rf, splits_dl)
+        if not ok:
+            print(f"SKIPPED")
+            print(f"  Skipping patient {pid}: {reason}")
+            continue
 
         glucose_idx = CLINICAL_FEATURES.index("glucose")
         y_mean      = float(splits_dl["scaler"].mean_[glucose_idx])
@@ -366,6 +413,18 @@ for pid in ALL_PATIENTS:
     except Exception as exc:
         print(f"ERROR — skipping patient {pid}: {exc}")
         continue
+
+    finally:
+        # Release GPU/RAM before moving to the next patient. Runs on every
+        # path out of the try block (success, SKIPPED continue, or the
+        # except above) so nothing accumulates across the 12-patient loop —
+        # this is the fix for the patient-588 hang: isolated 588 trains
+        # fine, so the freeze was resource buildup from the 4 prior
+        # patients' 16 uncleared GPU model trainings, not a data issue.
+        rf_model = lstm_model = ae_model = tcn_model = tr_model = None
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
 
 print()
 print("Experiment loop complete.")
