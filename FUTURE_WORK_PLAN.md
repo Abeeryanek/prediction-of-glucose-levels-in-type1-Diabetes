@@ -40,6 +40,9 @@ Khalil & Abeer | July 2026
 - Patient 540 sensitivity analysis — report results with and
   without this outlier to quantify its effect on mean RMSE
 - Extended Grid Search including window size as a parameter
+- CNN-LSTM currently runs in the BIG IDEAs pipeline
+  (`src/models/clean_treaining/`). Porting it into the shared
+  `src/models/` interface is planned future work, not yet done.
 
 ## What We Aim to Achieve
 
