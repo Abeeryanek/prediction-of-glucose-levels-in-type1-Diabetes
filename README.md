@@ -8,9 +8,10 @@ Bachelor project — University of Duisburg-Essen
 ## Project Overview
 
 This repository implements and compares six machine learning models for
-predicting blood glucose levels 30 minutes ahead (6 × 5-minute steps) in
-people with Type 1 diabetes. Accurate short-horizon forecasts enable insulin
-dose optimisation systems (closed-loop or advisory) to act before hypo- or
+predicting blood glucose levels 30 minutes ahead (6 × 5-minute steps),
+tested on both Type 1 diabetes cohorts (OhioT1DM) and a general-population
+cohort (Glucdict). Accurate short-horizon forecasts enable insulin dose
+optimisation systems (closed-loop or advisory) to act before hypo- or
 hyperglycaemic episodes occur.
 
 **Models evaluated**
@@ -35,7 +36,7 @@ CNN-LSTM is also implemented, but only in the BIG IDEAs-specific pipeline
 | OhioT1DM 2018 | 6 | ~8 wk train / ~2 wk test | CGM, bolus, meals, wristband |
 | OhioT1DM 2020 | 10 | ~8 wk train / ~2 wk test | CGM, bolus, meals, wristband |
 | BigIDEAS | multiple | varies | CGM, meals, insulin, activity |
-| Glucdict | 13 | ~10 days, no official split | CGM (Dexcom G6), smartwatch heart rate + accelerometer, activity/meal events |
+| Glucdict | 13 of 15 (2 excluded for data quality); source's 12-participant version is general population, mostly non-diabetic | ~10 days, no official split | CGM (Dexcom G6), smartwatch heart rate + accelerometer, activity/meal logging |
 
 ---
 

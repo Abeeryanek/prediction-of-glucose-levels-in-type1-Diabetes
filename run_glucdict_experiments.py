@@ -2,7 +2,10 @@
 Feature ablation study — Glucdict dataset, 30-min horizon.
 
 Glucdict provides CGM + TicWatch heart rate + accelerometer + activity logs
-(eat/drink events) for 13 T1D patients. Tests 4 feature combinations with
+(eat/drink events) for 13 participants in our working copy. The dataset's
+published source characterizes a 12-participant version as a
+general-population cohort (mostly non-diabetic students; only 1 had Type 1
+diabetes). Tests 4 feature combinations with
 RF and LSTM, reusing the RF/LSTM hyperparameters tuned via grid search on
 OhioT1DM (no Glucdict-specific grid search yet).
 

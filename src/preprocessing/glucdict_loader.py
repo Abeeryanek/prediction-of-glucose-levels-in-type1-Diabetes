@@ -3,7 +3,9 @@ Glucdict dataset loader for blood glucose forecasting.
 
 Glucdict provides ~10 days of simultaneous CGM and wearable sensor data
 (Dexcom G6 at 5-min resolution + smartwatch IMU / heart rate at high
-frequency) from 13 Type 1 diabetes patients.
+frequency) from 13 participants in our working copy. The dataset's published
+source characterizes a 12-participant version as a general-population
+cohort (mostly non-diabetic students; only 1 had Type 1 diabetes).
 
 Reference
 ---------
