@@ -44,6 +44,20 @@ Khalil & Abeer | July 2026
   (`src/models/clean_treaining/`). Porting it into the shared
   `src/models/` interface is planned future work, not yet done.
 
+## Known Limitations (Not Yet Implemented)
+
+- Interpolation experiments (glucose-gap interpolation pre-test and full
+  matrix) are not implemented. The current pipeline drops NaN rows
+  rather than interpolating glucose gaps. Planned future work.
+- Gradient Boosting exists as a model module
+  (`src/models/gradient_boosting.py`) but is not yet wired into the
+  main run scripts; it currently runs only in the BIG IDEAs pipeline.
+- CNN-LSTM runs in the BIG IDEAs pipeline (`clean_treaining/`) and is
+  not yet ported to the shared `src/models/` interface.
+- Glucdict experiments currently run at the 30-minute horizon only;
+  the 15/45-minute sweep implemented for OhioT1DM is not yet applied
+  to Glucdict.
+
 ## What We Aim to Achieve
 
 A reproducible multi-model, multi-dataset benchmark covering
